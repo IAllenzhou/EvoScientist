@@ -1,7 +1,6 @@
 """Tests for event loop management in streaming display."""
 
 import asyncio
-import pytest
 from unittest.mock import Mock, patch
 
 from EvoScientist.stream.display import _get_event_loop, _create_event_loop
@@ -199,30 +198,3 @@ class TestEventLoopThreadSafety:
 
         # Cleanup
         loop.close()
-
-    @pytest.mark.skipif(
-        True,  # Skip by default as threading tests can be flaky
-        reason="Thread test can be flaky in CI"
-    )
-    def test_worker_thread_creates_loop(self):
-        """Worker thread should be able to create its own loop."""
-        import threading
-
-        result = {"loop": None, "error": None}
-
-        def thread_func():
-            try:
-                # In a worker thread, get_event_loop() may raise RuntimeError
-                # Our code should handle this by creating a new loop
-                result["loop"] = _get_event_loop()
-            except Exception as e:
-                result["error"] = e
-
-        thread = threading.Thread(target=thread_func)
-        thread.start()
-        thread.join()
-
-        # Should either get a loop or handle the error gracefully
-        assert result["error"] is None or isinstance(result["error"], RuntimeError)
-        if result["loop"]:
-            assert not result["loop"].is_closed()

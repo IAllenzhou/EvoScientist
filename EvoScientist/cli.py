@@ -334,12 +334,15 @@ def _create_channel_handler():
             metadata=msg.metadata,
         )
 
-        # Wait for main thread to process and set response
-        response = await asyncio.to_thread(
-            _ChannelState.get_response, msg_id, 300  # 5 minute timeout
-        )
+        # Wait indefinitely for main thread to process and set response
+        # (no timeout - let the agent work as long as needed)
+        await asyncio.to_thread(event.wait)
 
-        return response or "No response"
+        # Get the response
+        with _ChannelState._response_lock:
+            response = _ChannelState.pending_responses.pop(msg_id, {}).get("response", "")
+
+        return response if response else "(empty response)"
 
     return handler
 
@@ -466,13 +469,17 @@ def cmd_interactive(
         console.print(f"[bold blue]>[/bold blue] {msg.content} [dim]{source_tag}[/dim]")
         console.print()
 
-        # Use SAME _run_streaming as CLI input — full Live experience
-        response_text = _run_streaming(
-            state["agent"], msg.content, state["thread_id"], show_thinking, interactive=True
-        )
+        try:
+            # Use SAME _run_streaming as CLI input — full Live experience
+            response_text = _run_streaming(
+                state["agent"], msg.content, state["thread_id"], show_thinking, interactive=True
+            )
 
-        # Set response for channel handler to retrieve
-        _ChannelState.set_response(msg.msg_id, response_text or "")
+            # Set response for channel handler to retrieve
+            _ChannelState.set_response(msg.msg_id, response_text or "")
+        except Exception as e:
+            console.print(f"[red]Channel processing error: {e}[/red]")
+            _ChannelState.set_response(msg.msg_id, f"Error: {e}")
 
         _print_separator()
 

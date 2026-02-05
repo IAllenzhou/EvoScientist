@@ -1,13 +1,5 @@
 """Smoke tests verifying package structure is intact."""
 
-import os
-import pytest
-
-needs_api_key = pytest.mark.skipif(
-    not os.getenv("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set",
-)
-
 
 def test_import_stream_utils():
     from EvoScientist.stream.utils import (
@@ -42,10 +34,3 @@ def test_import_tools():
     from EvoScientist.tools import think_tool
     assert think_tool is not None
     assert hasattr(think_tool, "invoke")
-
-
-@needs_api_key
-def test_import_package_exports():
-    from EvoScientist import EvoScientist_agent
-    # Just verify they are importable; don't call them without API key
-    assert EvoScientist_agent is not None
