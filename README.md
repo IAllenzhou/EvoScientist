@@ -53,6 +53,11 @@
 | OpenAI | `gpt-4o-mini` | `gpt-4o-mini` |
 | OpenAI | `o1` | `o1` |
 | OpenAI | `o1-mini` | `o1-mini` |
+| Google | `gemini-3-pro` | `gemini-3-pro-preview` |
+| Google | `gemini-3-flash` | `gemini-3-flash-preview` |
+| Google | `gemini-2.5-pro` | `gemini-2.5-pro` |
+| Google | `gemini-2.5-flash` | `gemini-2.5-flash` |
+| Google | `gemini-2.5-flash-lite` | `gemini-2.5-flash-lite` |
 | NVIDIA | `glm4.7` | `z-ai/glm4.7` |
 | NVIDIA | `deepseek-v3.1` | `deepseek-ai/deepseek-v3.1-terminus` |
 | NVIDIA | `nemotron-nano` | `nvidia/nemotron-3-nano-30b-a3b` |
@@ -114,8 +119,9 @@ Set keys directly in your terminal session. Add these to your shell profile (`~/
 export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
 export TAVILY_API_KEY="your_tavily_api_key_here"
 
-# Optional: OpenAI or NVIDIA provider
+# Optional: OpenAI, Google, or NVIDIA provider
 export OPENAI_API_KEY="your_openai_api_key_here"
+export GOOGLE_API_KEY="your_google_api_key_here"
 export NVIDIA_API_KEY="your_nvidia_api_key_here"
 ```
 
@@ -140,6 +146,7 @@ TAVILY_API_KEY=your_tavily_api_key_here
 | Key | Required | Description |
 |-----|----------|-------------|
 | `ANTHROPIC_API_KEY` | For Anthropic | Anthropic API key for Claude ([console.anthropic.com](https://console.anthropic.com/)) |
+| `GOOGLE_API_KEY` | For Google | Google API key for Gemini models ([aistudio.google.com](https://aistudio.google.com/api-keys)) |
 | `OPENAI_API_KEY` | For OpenAI | OpenAI API key for GPT models ([platform.openai.com](https://platform.openai.com/)) |
 | `NVIDIA_API_KEY` | For NVIDIA | NVIDIA API key for NIM models ([build.nvidia.com](https://build.nvidia.com/)) |
 | `TAVILY_API_KEY` | Yes | Tavily API key for web search ([app.tavily.com](https://app.tavily.com/)) |
