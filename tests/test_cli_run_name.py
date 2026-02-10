@@ -1,9 +1,7 @@
 """Tests for the --name/-n run-name deduplication logic."""
 
-import re
 from pathlib import Path
 
-import pytest
 
 from EvoScientist.cli import _deduplicate_run_name
 
