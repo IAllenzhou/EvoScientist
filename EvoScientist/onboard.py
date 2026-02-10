@@ -736,6 +736,7 @@ def _install_node(method: str, command: str) -> bool:
     try:
         proc = subprocess.run(
             command.split(),
+            capture_output=True, text=True,
             timeout=120,
         )
         return proc.returncode == 0
@@ -748,6 +749,46 @@ def _install_node(method: str, command: str) -> bool:
     except Exception as e:
         console.print(f"  [red]✗ Installation failed: {e}[/red]")
         return False
+
+
+def _ensure_npx(reason: str) -> bool:
+    """Check for npx and offer to install Node.js if missing.
+
+    Args:
+        reason: Why npx is needed (shown in the warning message).
+
+    Returns:
+        True if npx is available (was already present or just installed).
+    """
+    if _check_npx():
+        return True
+
+    console.print(f"  [yellow]✗ npx not found — {reason}[/yellow]")
+    method, command = _detect_node_install_method()
+
+    if method != "manual":
+        install_node = questionary.confirm(
+            f"Install Node.js via {method}? ({command})",
+            default=True,
+            style=WIZARD_STYLE,
+            qmark=f"  {QMARK}",
+        ).ask()
+        if install_node is None:
+            raise KeyboardInterrupt()
+        if install_node:
+            console.print("  [dim]Installing Node.js...[/dim]")
+            if _install_node(method, command):
+                if _check_npx():
+                    console.print("  [green]✓ npx now available[/green]")
+                    return True
+                else:
+                    console.print("  [yellow]✗ npx still not found after install[/yellow]")
+            else:
+                console.print("  [red]✗ Installation failed[/red]")
+    else:
+        console.print(f"  [dim]Install Node.js: {command}[/dim]")
+
+    return False
 
 
 def _step_skills() -> list[str]:
@@ -776,41 +817,14 @@ def _step_skills() -> list[str]:
         raise KeyboardInterrupt()
 
     if not selected:
-        # Easter egg: verify skill discovery environment
+        # Verify skill discovery environment
         console.print("  [dim]Checking skill discovery environment...[/dim]")
-        has_npx = _check_npx()
+        has_npx = _ensure_npx("skill discovery requires Node.js")
         if has_npx:
             _print_step_skipped("Skills", "none selected — good choice!")
             console.print("  [green]✓ npx found — skill discovery available[/green]")
             console.print("  [yellow bold]* Less is more[/yellow bold] [dim](EvoScientist can discover and install skills on its own)[/dim]")
         else:
-            console.print("  [yellow]✗ npx not found — skill discovery requires Node.js[/yellow]")
-
-            method, command = _detect_node_install_method()
-
-            if method != "manual":
-                console.print()
-                install_node = questionary.confirm(
-                    f"Install Node.js via {method}? ({command})",
-                    default=True,
-                    style=WIZARD_STYLE,
-                    qmark=QMARK,
-                ).ask()
-
-                if install_node is None:
-                    raise KeyboardInterrupt()
-
-                if install_node:
-                    console.print()
-                    if _install_node(method, command):
-                        console.print()
-                        if _check_npx():
-                            console.print("  [green]✓ npx now available — skill discovery ready[/green]")
-                        else:
-                            console.print("  [yellow]✗ npx still not found after install[/yellow]")
-            else:
-                console.print(f"  [dim]  Install Node.js: {command}[/dim]")
-
             _print_step_skipped("Skills", "none selected")
 
         return []
@@ -929,6 +943,15 @@ def _step_mcp_servers() -> list[str]:
         console.print("  [dim]Add later with: EvoSci mcp add <name> <command> [--env-ref KEY] -- [args][/dim]")
         return []
 
+    # Check if any selected servers require npx
+    needs_npx = any(
+        srv.get("command") == "npx"
+        for srv in _RECOMMENDED_MCP_SERVERS
+        if srv["name"] in selected
+    )
+    if needs_npx:
+        _ensure_npx("some MCP servers require Node.js")
+
     from .mcp.client import add_mcp_server
 
     installed = []
@@ -1026,6 +1049,7 @@ def _install_imsg() -> bool:
     try:
         proc = subprocess.run(
             ["brew", "install", "steipete/tap/imsg"],
+            capture_output=True, text=True,
             timeout=120,
         )
         return proc.returncode == 0
