@@ -48,11 +48,13 @@ def _create_session_workspace(name: str | None = None) -> str:
     return workspace_dir
 
 
-def _load_agent(workspace_dir: str | None = None):
-    """Load the CLI agent (with InMemorySaver checkpointer for multi-turn).
+def _load_agent(workspace_dir: str | None = None, checkpointer=None):
+    """Load the CLI agent with optional persistent checkpointer.
 
     Args:
         workspace_dir: Optional per-session workspace directory.
+        checkpointer: Optional LangGraph checkpointer (e.g. ``AsyncSqliteSaver``).
+            Falls back to ``InMemorySaver`` when ``None``.
     """
     from ..EvoScientist import create_cli_agent
-    return create_cli_agent(workspace_dir=workspace_dir)
+    return create_cli_agent(workspace_dir=workspace_dir, checkpointer=checkpointer)

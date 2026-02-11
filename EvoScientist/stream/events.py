@@ -59,7 +59,12 @@ def _extract_tool_content(msg) -> tuple[str, bool]:
     return str(content), False
 
 
-async def stream_agent_events(agent: Any, message: str, thread_id: str) -> AsyncIterator[dict]:
+async def stream_agent_events(
+    agent: Any,
+    message: str,
+    thread_id: str,
+    metadata: dict | None = None,
+) -> AsyncIterator[dict]:
     """Stream events from the agent graph using async iteration.
 
     Uses agent.astream() with subgraphs=True to see sub-agent activity.
@@ -68,13 +73,17 @@ async def stream_agent_events(agent: Any, message: str, thread_id: str) -> Async
         agent: Compiled state graph from create_deep_agent()
         message: User message
         thread_id: Thread ID for conversation persistence
+        metadata: Optional metadata dict merged into the LangGraph config
+            (e.g. agent_name, updated_at for checkpoint persistence).
 
     Yields:
         Event dicts: thinking, text, tool_call, tool_result,
                      subagent_start, subagent_tool_call, subagent_tool_result, subagent_end,
                      done, error
     """
-    config = {"configurable": {"thread_id": thread_id}}
+    config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    if metadata:
+        config["metadata"] = metadata
     emitter = StreamEventEmitter()
     main_tracker = ToolCallTracker()
     full_response = ""

@@ -586,6 +586,7 @@ def _run_streaming(
     on_thinking: Callable[[str], None] | None = None,
     on_todo: Callable[[list[dict]], None] | None = None,
     on_file_write: Callable[[str], None] | None = None,
+    metadata: dict | None = None,
 ) -> str:
     """Run async streaming and render with Rich Live display.
 
@@ -604,6 +605,8 @@ def _run_streaming(
             Called once when write_todos tool_call is detected.
         on_file_write: Optional sync callback receiving the real filesystem path
             when the agent writes a media file (image/pdf) via write_file.
+        metadata: Optional metadata dict forwarded to ``stream_agent_events``
+            for LangGraph checkpoint persistence.
 
     Returns:
         The final response text.
@@ -618,7 +621,7 @@ def _run_streaming(
 
     async def _consume() -> None:
         nonlocal _thinking_sent, _todo_sent
-        async for event in stream_agent_events(agent, message, thread_id):
+        async for event in stream_agent_events(agent, message, thread_id, metadata=metadata):
             event_type = state.handle_event(event)
 
             # Send thinking to channel when transitioning away from thinking

@@ -406,17 +406,24 @@ def _main_callback(
             os.makedirs(workspace_dir, exist_ok=True)
             workspace_fixed = True
 
-    # Load agent with session workspace
-    console.print("[dim]Loading agent...[/dim]")
-    agent = _load_agent(workspace_dir=workspace_dir)
-
     if prompt:
-        # Single-shot mode: execute query and exit
-        cmd_run(agent, prompt, thread_id=thread_id, show_thinking=show_thinking, workspace_dir=workspace_dir)
+        # Single-shot mode: wrap in persistent checkpointer
+        import asyncio
+        from ..sessions import get_checkpointer, generate_thread_id
+
+        async def _single_shot():
+            async with get_checkpointer() as checkpointer:
+                console.print("[dim]Loading agent...[/dim]")
+                agent = _load_agent(workspace_dir=workspace_dir, checkpointer=checkpointer)
+                tid = thread_id or generate_thread_id()
+                cmd_run(agent, prompt, thread_id=tid, show_thinking=show_thinking, workspace_dir=workspace_dir)
+
+        import nest_asyncio  # type: ignore[import-untyped]
+        nest_asyncio.apply()
+        asyncio.get_event_loop().run_until_complete(_single_shot())
     else:
-        # Interactive mode (default)
+        # Interactive mode (default) — checkpointer managed inside cmd_interactive
         cmd_interactive(
-            agent,
             show_thinking=show_thinking,
             workspace_dir=workspace_dir,
             workspace_fixed=workspace_fixed,
@@ -427,6 +434,7 @@ def _main_callback(
             imessage_allowed_senders=config.imessage_allowed_senders,
             imessage_send_thinking=config.imessage_send_thinking,
             run_name=name,
+            thread_id=thread_id,
         )
 
 
@@ -456,3 +464,7 @@ def _configure_logging():
         root_logger.removeHandler(h)
     root_logger.addHandler(handler)
     root_logger.setLevel(logging.WARNING)
+
+    # Suppress noisy schema warnings from langchain_google_genai
+    # (e.g. "Key '$schema' is not supported in schema, ignoring")
+    logging.getLogger("langchain_google_genai._function_utils").setLevel(logging.ERROR)
