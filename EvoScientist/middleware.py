@@ -5,34 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from deepagents.backends import FilesystemBackend
-from deepagents.middleware.skills import SkillsMiddleware
 
 from .memory import EvoMemoryMiddleware
 from .paths import MEMORY_DIR as _DEFAULT_MEMORY_DIR
 
 if TYPE_CHECKING:
     from langchain.chat_models import BaseChatModel
-
-
-def create_skills_middleware(
-    composite_backend,
-) -> SkillsMiddleware:
-    """Create a SkillsMiddleware that loads skills.
-
-    Uses the CompositeBackend directly so that skill paths in the system
-    prompt match the ``/skills/`` route (e.g. ``/skills/find-skills/SKILL.md``).
-
-    Args:
-        composite_backend: The CompositeBackend that routes ``/skills/`` to
-            the MergedReadOnlyBackend.
-
-    Returns:
-        Configured SkillsMiddleware instance
-    """
-    return SkillsMiddleware(
-        backend=composite_backend,
-        sources=["/skills/"],
-    )
 
 
 def create_memory_middleware(

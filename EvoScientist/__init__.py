@@ -28,8 +28,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MODELS": (".llm", "MODELS"),
     "list_models": (".llm", "list_models"),
     "DEFAULT_MODEL": (".llm", "DEFAULT_MODEL"),
-    # Middleware
-    "create_skills_middleware": (".middleware", "create_skills_middleware"),
     # Prompts
     "get_system_prompt": (".prompts", "get_system_prompt"),
     "RESEARCHER_INSTRUCTIONS": (".prompts", "RESEARCHER_INSTRUCTIONS"),

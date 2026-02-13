@@ -23,7 +23,7 @@ from .backends import CustomSandboxBackend, MergedReadOnlyBackend
 from .config import get_effective_config, apply_config_to_env
 from .llm import get_chat_model
 from .mcp import load_mcp_tools
-from .middleware import create_skills_middleware, create_memory_middleware
+from .middleware import create_memory_middleware
 from .prompts import RESEARCHER_INSTRUCTIONS, get_system_prompt
 from .utils import load_subagents
 from .tools import tavily_search, think_tool, skill_manager
@@ -136,6 +136,7 @@ def _build_base_kwargs(base_backend, base_middleware):
         subagents=subs,
         middleware=base_middleware,
         system_prompt=SYSTEM_PROMPT,
+        skills=["/skills/"],
     )
 
 
@@ -176,6 +177,7 @@ def load_mcp_and_build_kwargs(base_backend, base_middleware):
         subagents=subs,
         middleware=base_middleware,
         system_prompt=SYSTEM_PROMPT,
+        skills=["/skills/"],
     )
 
 
@@ -185,7 +187,6 @@ prompt_refs = {
 
 base_middleware = [
     create_memory_middleware(MEMORY_DIR, extraction_model=chat_model),
-    create_skills_middleware(backend),
 ]
 
 # Default agent (no checkpointer) — used by langgraph dev / LangSmith / notebooks.
@@ -253,7 +254,6 @@ def create_cli_agent(workspace_dir: str | None = None, checkpointer=None):
 
     mw = [
         create_memory_middleware(MEMORY_DIR, extraction_model=chat_model),
-        create_skills_middleware(be),
     ]
 
     # Re-load MCP tools from current config (picks up /mcp add changes)
