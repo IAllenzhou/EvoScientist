@@ -125,9 +125,17 @@ def get_chat_model(
             else:
                 provider = "anthropic"  # Default fallback
 
-    # SiliconFlow / OpenRouter → route through OpenAI provider with base_url
-    _is_third_party = provider in ("siliconflow", "openrouter")
-    if provider == "siliconflow":
+    # SiliconFlow / OpenRouter / Custom → route through OpenAI provider with base_url
+    _is_third_party = provider in ("siliconflow", "openrouter", "custom")
+    if provider == "custom":
+        base_url = os.environ.get("CUSTOM_BASE_URL", "")
+        if base_url:
+            kwargs["base_url"] = base_url
+        api_key = os.environ.get("CUSTOM_API_KEY", "")
+        if api_key:
+            kwargs["api_key"] = api_key
+        provider = "openai"
+    elif provider == "siliconflow":
         kwargs["base_url"] = _SILICONFLOW_BASE_URL
         api_key = os.environ.get("SILICONFLOW_API_KEY", "")
         if api_key:

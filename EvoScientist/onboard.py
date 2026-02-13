@@ -367,10 +367,11 @@ def _step_provider(config: EvoScientistConfig) -> str:
         Choice(title="NVIDIA (DeepSeek, Kimi, GLM, MiniMax, Step, etc.)", value="nvidia"),
         Choice(title="SiliconFlow (third party)", value="siliconflow"),
         Choice(title="OpenRouter (third party)", value="openrouter"),
+        Choice(title="Other (OpenAI-compatible)", value="custom"),
     ]
 
     # Set default based on current config
-    default = config.provider if config.provider in ["anthropic", "openai", "google-genai", "nvidia", "siliconflow", "openrouter"] else "anthropic"
+    default = config.provider if config.provider in ["anthropic", "openai", "google-genai", "nvidia", "siliconflow", "openrouter", "custom"] else "anthropic"
 
     provider = questionary.select(
         "Select your LLM provider:",
@@ -395,6 +396,7 @@ def _provider_key_info(config: EvoScientistConfig, provider: str):
         "google-genai": ("Google",       config.google_api_key       or os.environ.get("GOOGLE_API_KEY", ""),       validate_google_key),
         "siliconflow":  ("SiliconFlow",  config.siliconflow_api_key  or os.environ.get("SILICONFLOW_API_KEY", ""),  validate_siliconflow_key),
         "openrouter":   ("OpenRouter",   config.openrouter_api_key   or os.environ.get("OPENROUTER_API_KEY", ""),   validate_openrouter_key),
+        "custom":       ("Custom",       config.custom_api_key       or os.environ.get("CUSTOM_API_KEY", ""),       None),
     }
     return mapping.get(provider, ("OpenAI", config.openai_api_key or os.environ.get("OPENAI_API_KEY", ""), validate_openai_key))
 
@@ -432,7 +434,7 @@ def _prompt_and_validate_api_key(
     if not key_to_validate:
         return None
 
-    if not skip_validation:
+    if not skip_validation and validate_fn is not None:
         console.print("  [dim]Validating...[/dim]", end="")
         valid, msg = validate_fn(key_to_validate)
         if valid:
@@ -492,6 +494,31 @@ _THIRD_PARTY_EXAMPLES: dict[str, list[tuple[str, str]]] = {
 }
 
 
+def _step_base_url(config: EvoScientistConfig) -> str:
+    """Prompt for custom provider base URL.
+
+    Args:
+        config: Current configuration.
+
+    Returns:
+        Base URL string.
+    """
+    current = config.custom_base_url
+    hint = f"Current: {current}" if current else ""
+    default = current if current else ""
+
+    url = questionary.text(
+        f"Base URL{' (' + hint + ', Enter to keep)' if hint else ''}:",
+        default=default,
+        style=WIZARD_STYLE,
+        qmark=QMARK,
+        placeholder=FormattedText([("fg:#858585", " e.g. https://api.example.com/v1")]) if not default else None,
+    ).ask()
+    if url is None:
+        raise KeyboardInterrupt()
+    return url.strip()
+
+
 def _step_model(config: EvoScientistConfig, provider: str) -> str:
     """Step 3: Select model for the provider.
 
@@ -544,13 +571,12 @@ def _step_model(config: EvoScientistConfig, provider: str) -> str:
     entries = get_models_for_provider(provider)
 
     if not entries:
-        # Fallback if no models for provider
-        console.print(f"  [yellow]No registered models for {provider}[/yellow]")
+        # Custom / unknown provider: direct text input
         model = questionary.text(
-            "Enter model name:",
-            default=config.model,
+            "Model name:",
             style=WIZARD_STYLE,
             qmark=QMARK,
+            placeholder=FormattedText([("fg:#858585", " e.g. owner/model-name")]),
         ).ask()
         if model is None:
             raise KeyboardInterrupt()
@@ -1422,7 +1448,12 @@ def run_onboard(skip_validation: bool = False) -> bool:
         provider = _step_provider(config)
         config.provider = provider
 
-        # Step 2: Provider API Key
+        # Step 2a: Base URL (custom provider only)
+        if provider == "custom":
+            base_url = _step_base_url(config)
+            config.custom_base_url = base_url
+
+        # Step 2b: Provider API Key
         new_key = _step_provider_api_key(config, provider, skip_validation)
         if new_key is not None:
             if provider == "anthropic":
@@ -1435,6 +1466,8 @@ def run_onboard(skip_validation: bool = False) -> bool:
                 config.siliconflow_api_key = new_key
             elif provider == "openrouter":
                 config.openrouter_api_key = new_key
+            elif provider == "custom":
+                config.custom_api_key = new_key
             else:
                 config.openai_api_key = new_key
         else:
@@ -1448,6 +1481,8 @@ def run_onboard(skip_validation: bool = False) -> bool:
                 current = config.siliconflow_api_key
             elif provider == "openrouter":
                 current = config.openrouter_api_key
+            elif provider == "custom":
+                current = config.custom_api_key
             else:
                 current = config.openai_api_key
             if not current:
