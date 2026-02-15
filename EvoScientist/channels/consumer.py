@@ -158,7 +158,10 @@ class InboundConsumer:
                 # Evict oldest entry
                 oldest = next(iter(self._sessions))
                 del self._sessions[oldest]
-            self._sessions[sender_id] = self.thread_id or str(uuid.uuid4())
+            if self.thread_id:
+                self._sessions[sender_id] = f"{self.thread_id}:{sender_id}"
+            else:
+                self._sessions[sender_id] = str(uuid.uuid4())
         return self._sessions[sender_id]
 
     def _get_channel(self, channel_name: str) -> Channel | None:
@@ -361,7 +364,7 @@ class InboundConsumer:
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content=f"Error: {e}",
+                    content="Sorry, something went wrong. Please try again later.",
                     metadata=msg.metadata,
                 ))
             finally:

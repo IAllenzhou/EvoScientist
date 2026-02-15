@@ -176,24 +176,31 @@ async def download_attachment(
         local_path = media_path(f"{prefix}{safe_name}")
 
         async with httpx.AsyncClient(proxy=proxy) as client:
-            resp = await client.get(url, headers=headers or {}, timeout=30)
-        if resp.status_code != 200:
-            return None, f"[attachment: {filename} - download failed]"
+            async with client.stream("GET", url, headers=headers or {}, timeout=30) as resp:
+                if resp.status_code != 200:
+                    return None, f"[attachment: {filename} - download failed]"
 
-        # Check Content-Length when file_size was not known beforehand
-        if file_size is None:
-            cl = resp.headers.get("content-length")
-            if cl:
-                try:
-                    too_large = check_attachment_size(int(cl), filename)
-                    if too_large:
-                        return None, too_large
-                except (ValueError, TypeError):
-                    pass
-            if len(resp.content) > MAX_ATTACHMENT_BYTES:
-                return None, check_attachment_size(len(resp.content), filename)
+                # Check Content-Length header before downloading body
+                if file_size is None:
+                    cl = resp.headers.get("content-length")
+                    if cl:
+                        try:
+                            too_large = check_attachment_size(int(cl), filename)
+                            if too_large:
+                                return None, too_large
+                        except (ValueError, TypeError):
+                            pass
 
-        local_path.write_bytes(resp.content)
+                # Stream body with incremental size check
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_ATTACHMENT_BYTES:
+                        return None, check_attachment_size(total, filename)
+                    chunks.append(chunk)
+
+        local_path.write_bytes(b"".join(chunks))
         return str(local_path), f"[attachment: {local_path}]"
     except Exception as e:
         _logger.warning(f"Failed to download attachment: {e}")
@@ -670,7 +677,12 @@ class Channel(ChannelPlugin, ABC):
 
     def _should_process(self, raw: RawIncoming) -> bool:
         """Decide whether to process a message based on mention gating."""
-        if not raw.is_group or self.require_mention == "off":
+        if self.require_mention == "off":
+            return True
+        if self.require_mention == "always":
+            return raw.was_mentioned
+        # "group" — require mention only in groups
+        if not raw.is_group:
             return True
         return raw.was_mentioned
 

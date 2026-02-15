@@ -346,7 +346,10 @@ def build_inbound_pipeline(
     ))
 
     if plugin.pairing is not None:
-        middlewares.append(PairingMiddleware(channel_name=plugin.id))
+        middlewares.append(PairingMiddleware(
+            channel_name=plugin.id,
+            dm_policy=dm_policy,
+        ))
 
     if caps.groups:
         middlewares.append(GroupHistoryMiddleware())

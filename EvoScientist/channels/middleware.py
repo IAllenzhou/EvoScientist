@@ -511,6 +511,12 @@ class FormattingMiddleware(OutboundMiddlewareBase):
         """Convert text to channel format."""
         return self._formatter.format(text)
 
+    async def process_outbound(
+        self, message: OutboundMessage, context: dict[str, Any],
+    ) -> OutboundMessage | None:
+        formatted = self._formatter.format(message.content)
+        return dataclasses.replace(message, content=formatted)
+
 
 # ── Retry ────────────────────────────────────────────────────────────
 
@@ -662,11 +668,13 @@ class MentionGatingMiddleware(InboundMiddleware):
         return raw
 
     def _should_process(self, raw: RawIncoming) -> bool:
-        if not raw.is_group or self.require_mention == "off":
+        if self.require_mention == "off":
             return True
         if self.require_mention == "always":
             return raw.was_mentioned
-        # "group" — require mention in groups
+        # "group" — require mention only in groups
+        if not raw.is_group:
+            return True
         return raw.was_mentioned
 
 
@@ -779,10 +787,12 @@ class PairingMiddleware(InboundMiddleware):
         self,
         channel_name: str,
         send_response_fn: Callable[[str, str], Any] | None = None,
+        dm_policy: str = "allowlist",
     ) -> None:
         self._manager = PairingManager()
         self._channel_name = channel_name
         self._send_response_fn = send_response_fn
+        self._dm_policy = dm_policy
 
     async def process_inbound(
         self, raw: RawIncoming, context: dict[str, Any],
@@ -790,8 +800,7 @@ class PairingMiddleware(InboundMiddleware):
         if raw.is_group:
             return raw  # pairing only applies to DMs
 
-        dm_policy = context.get("dm_policy", "allowlist")
-        if dm_policy != "pairing":
+        if self._dm_policy != "pairing":
             return raw
 
         if self._manager.is_approved(self._channel_name, raw.sender_id):

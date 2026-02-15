@@ -1108,7 +1108,7 @@ class TestInboundConsumer:
         assert tid1 == tid2
 
     def test_shared_thread_id_bug(self):
-        """[B-20] If thread_id is non-empty, all senders share the same session."""
+        """[B-20] If thread_id is non-empty, senders get unique thread IDs with shared prefix."""
         bus = MessageBus()
         mgr = ChannelManager(bus)
         mgr.register(StubChannel())
@@ -1118,8 +1118,10 @@ class TestInboundConsumer:
         )
         tid1 = consumer._get_thread_id("alice")
         tid2 = consumer._get_thread_id("bob")
-        # BUG: Both get the same thread_id
-        assert tid1 == tid2 == "shared_thread"
+        # Fixed: Each sender gets a unique thread_id using thread_id as prefix
+        assert tid1 != tid2
+        assert tid1 == "shared_thread:alice"
+        assert tid2 == "shared_thread:bob"
 
     def test_session_eviction_is_fifo_not_lru(self):
         """[B-19] Sessions evict oldest by insertion, not by access."""

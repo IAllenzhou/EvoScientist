@@ -199,7 +199,7 @@ SIGNAL = ChannelCapabilities(
 
 EMAIL = ChannelCapabilities(
     format_type="html",
-    max_text_length=0,  # no practical limit
+    max_text_length=999_999,  # no practical limit
     media_send=True,
     media_receive=True,
     html=True,
@@ -208,7 +208,7 @@ EMAIL = ChannelCapabilities(
 
 IMESSAGE = ChannelCapabilities(
     format_type="plain",
-    max_text_length=0,
+    max_text_length=999_999,
     typing=False,      # Apple does not expose typing indicator API
     media_send=True,
     media_receive=True,
