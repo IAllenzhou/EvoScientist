@@ -1434,6 +1434,7 @@ def _step_channels(config: EvoScientistConfig) -> dict[str, object]:
 
     # --- Common prompt: send thinking (shown when any channel is enabled) ---
     if enabled_channels:
+        console.print("\n  [bold cyan]── Channel Settings ──[/bold cyan]")
         thinking_choices = [
             Choice(title="On (forward model reasoning)", value=True),
             Choice(title="Off (only send final responses)", value=False),
