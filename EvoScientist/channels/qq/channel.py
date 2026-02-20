@@ -69,6 +69,7 @@ class QQChannel(Channel):
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: dict[str, int] = {}  # msg_id -> next seq number
         self._msg_seq_order: deque = deque(maxlen=500)
+        self._msg_seq_ids: set[str] = set()  # companion set for O(1) lookup
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -167,10 +168,12 @@ class QQChannel(Channel):
         """Return the next msg_seq for *msg_id* and increment the counter."""
         seq = self._msg_seq.get(msg_id, 1)
         self._msg_seq[msg_id] = seq + 1
-        if msg_id not in set(self._msg_seq_order):
+        if msg_id not in self._msg_seq_ids:
             self._msg_seq_order.append(msg_id)
+            self._msg_seq_ids.add(msg_id)
             if len(self._msg_seq_order) > 500:
                 oldest = self._msg_seq_order.popleft()
+                self._msg_seq_ids.discard(oldest)
                 self._msg_seq.pop(oldest, None)
         return seq
 

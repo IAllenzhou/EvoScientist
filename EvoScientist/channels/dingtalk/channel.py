@@ -347,7 +347,7 @@ class DingTalkChannel(Channel, WebSocketMixin, TokenMixin):
                 pass
             self._ws_task = None
         await self._stop_ws()
-        if self._http_client:
+        if hasattr(self, "_http_client") and self._http_client:
             await self._http_client.aclose()
             self._http_client = None
         self._access_token = None

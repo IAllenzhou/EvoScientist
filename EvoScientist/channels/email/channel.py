@@ -1,6 +1,7 @@
 """Email channel implementation using IMAP + SMTP."""
 
 import asyncio
+import contextlib
 import email as email_lib
 import email.utils
 import html
@@ -55,7 +56,7 @@ class EmailConfig(BaseChannelConfig):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
-    smtp_use_tls: bool = True
+    smtp_starttls: bool = True  # True=STARTTLS (port 587), False=implicit SSL (port 465)
     from_address: str = ""
     poll_interval: int = 30
     mark_seen: bool = True
@@ -80,7 +81,7 @@ class EmailChannel(Channel, PollingMixin):
         cfg = self.config
         if not cfg.imap_host or not cfg.imap_username:
             raise ChannelError("Email imap_host and imap_username are required")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._connect_imap)
         self._running = True
         logger.info(f"Email channel started (IMAP: {cfg.imap_host}, poll {cfg.poll_interval}s)")
@@ -119,7 +120,7 @@ class EmailChannel(Channel, PollingMixin):
         self._connect_imap()
 
     async def _poll_once(self) -> None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         messages = await loop.run_in_executor(None, self._fetch_unseen)
         for m in messages:
             await self._process_email(m)
@@ -237,8 +238,39 @@ class EmailChannel(Channel, PollingMixin):
     def _is_ready(self) -> bool:
         return bool(self.config.smtp_host)
 
+    @contextlib.contextmanager
+    def _smtp_connect(self):
+        """Open an SMTP connection as a context manager.
+
+        Ensures the connection is closed even if login or send raises.
+        Uses STARTTLS (port 587) when smtp_starttls=True, otherwise
+        implicit SSL (port 465).
+        """
+        cfg = self.config
+        srv = None
+        try:
+            if cfg.smtp_starttls:
+                srv = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30)
+                srv.starttls()
+            else:
+                srv = smtplib.SMTP_SSL(
+                    cfg.smtp_host, cfg.smtp_port,
+                    context=ssl.create_default_context(), timeout=30,
+                )
+            srv.login(cfg.smtp_username, cfg.smtp_password)
+            yield srv
+        finally:
+            if srv is not None:
+                try:
+                    srv.quit()
+                except Exception:
+                    try:
+                        srv.close()
+                    except Exception:
+                        pass
+
     async def _send_chunk(self, chat_id, formatted_text, raw_text, reply_to, metadata):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
                 None, self._smtp_send_html, chat_id, formatted_text, raw_text, metadata or {},
@@ -268,17 +300,11 @@ class EmailChannel(Channel, PollingMixin):
             msg["References"] = f"{meta.get('references', '')} {orig_id}".strip()
         msg.set_content(content)
         try:
-            if cfg.smtp_use_tls:
-                srv = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30)
-                srv.starttls()
-            else:
-                srv = smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, context=ssl.create_default_context(), timeout=30)
-            srv.login(cfg.smtp_username, cfg.smtp_password)
-            srv.sendmail(from_addr, [to], msg.as_string())
-            srv.quit()
+            with self._smtp_connect() as srv:
+                srv.sendmail(from_addr, [to], msg.as_string())
         except Exception as e:
-            logger.error(f"SMTP send failed: from={from_addr} to={to} error={e}")
-            raise RuntimeError(f"SMTP: {e}")
+            logger.error(f"SMTP send failed: from={from_addr} to={to}")
+            raise RuntimeError("SMTP send failed") from e
 
     def _smtp_send_html(self, to: str, html_content: str, plain_content: str, meta: dict) -> None:
         """Send an email with both HTML and plain-text parts."""
@@ -297,17 +323,11 @@ class EmailChannel(Channel, PollingMixin):
         msg.attach(MIMEText(plain_content, "plain", "utf-8"))
         msg.attach(MIMEText(html_content, "html", "utf-8"))
         try:
-            if cfg.smtp_use_tls:
-                srv = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30)
-                srv.starttls()
-            else:
-                srv = smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, context=ssl.create_default_context(), timeout=30)
-            srv.login(cfg.smtp_username, cfg.smtp_password)
-            srv.sendmail(from_addr, [to], msg.as_string())
-            srv.quit()
+            with self._smtp_connect() as srv:
+                srv.sendmail(from_addr, [to], msg.as_string())
         except Exception as e:
-            logger.error(f"SMTP HTML send failed: from={from_addr} to={to} error={e}")
-            raise RuntimeError(f"SMTP HTML: {e}")
+            logger.error(f"SMTP HTML send failed: from={from_addr} to={to}")
+            raise RuntimeError("SMTP HTML send failed") from e
 
     # ── Media send (email attachment) ─────────────────────────────
 
@@ -319,7 +339,7 @@ class EmailChannel(Channel, PollingMixin):
         metadata: dict | None = None,
     ) -> bool:
         """Send a file as an email attachment via SMTP."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None, self._smtp_send_attachment, recipient, file_path, caption, metadata or {},
         )
@@ -353,14 +373,8 @@ class EmailChannel(Channel, PollingMixin):
         msg.attach(part)
 
         try:
-            if cfg.smtp_use_tls:
-                srv = smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30)
-                srv.starttls()
-            else:
-                srv = smtplib.SMTP_SSL(cfg.smtp_host, cfg.smtp_port, context=ssl.create_default_context(), timeout=30)
-            srv.login(cfg.smtp_username, cfg.smtp_password)
-            srv.sendmail(from_addr, [to], msg.as_string())
-            srv.quit()
+            with self._smtp_connect() as srv:
+                srv.sendmail(from_addr, [to], msg.as_string())
         except Exception as e:
-            logger.error(f"SMTP attachment send failed: from={from_addr} to={to} error={e}")
-            raise RuntimeError(f"SMTP attachment: {e}")
+            logger.error(f"SMTP attachment send failed: from={from_addr} to={to}")
+            raise RuntimeError("SMTP attachment send failed") from e
