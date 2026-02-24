@@ -125,6 +125,22 @@ git pull && uv sync --dev
 
 </details>
 
+<details>
+<summary>Optional: Channel dependencies</summary>
+
+Messaging channel integrations require extra dependencies. Install only what you need:
+
+```bash
+uv pip install "EvoScientist[telegram]"     # Telegram
+uv pip install "EvoScientist[discord]"      # Discord
+uv pip install "EvoScientist[slack]"        # Slack
+uv pip install "EvoScientist[wechat]"       # WeChat
+uv pip install "EvoScientist[qq]"           # QQ
+uv pip install "EvoScientist[all-channels]" # everything
+```
+
+</details>
+
 <p align="right"><a href="#top">🔝Back to top</a></p>
 
 ## 🔑 Configuration
