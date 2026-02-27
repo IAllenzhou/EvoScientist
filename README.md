@@ -56,9 +56,13 @@ Going beyond traditional human-in-the-loop systems, EvoScientist introduces an A
 - **🔌 MCP & Skills** — Plug in MCP servers or install skills from GitHub on the fly.
 
 ## 🎯 ᯓ➤ Roadmap
+- [x] 🖥️ TUI powered by Rich and Textual
+- [x] 📻 EvoMemory v1.0 shipped
+- [x] ⚒️ 200+ predefined skills built in
 - [ ] 📑 Technical report on the way
 - [ ] 📺 Demo and tutorial in the works
 - [ ] 📊 Benchmark suite to be released
+- [ ] ⏰ Scheduled tasks for the core system planned
 - [ ] 🧩 More built-in skills and integrations ahead
 
 ## 🔥 News
