@@ -14,6 +14,7 @@ from rich.console import Console, Group  # type: ignore[import-untyped]
 from rich.live import Live  # type: ignore[import-untyped]
 from rich.markdown import Markdown  # type: ignore[import-untyped]
 from rich.panel import Panel  # type: ignore[import-untyped]
+from rich.spinner import Spinner  # type: ignore[import-untyped]
 from rich.text import Text  # type: ignore[import-untyped]
 
 from ..paths import resolve_virtual_path
@@ -221,6 +222,8 @@ def _render_subagent_section(sa: 'SubAgentState', compact: bool = False) -> list
         return elements
 
     # --- Full mode: bordered section for Live streaming ---
+    MAX_SA_VISIBLE = 3       # max completed tools shown
+    MAX_SA_RUNNING = 2       # max running tools shown
 
     # Header
     header = Text()
@@ -231,8 +234,21 @@ def _render_subagent_section(sa: 'SubAgentState', compact: bool = False) -> list
         header.append(f"\u2713 {display_name}", style="bold green")
     elements.append(header)
 
-    # Show every tool call with its status
-    for tc, tr in completed:
+    # Completed tools — collapse older ones into a summary
+    slots = max(0, MAX_SA_VISIBLE - len(pending))
+    hidden = completed[:-slots] if slots and len(completed) > slots else (completed if not slots else [])
+    visible = completed[-slots:] if slots else []
+
+    if hidden:
+        ok = sum(1 for _, tr in hidden if tr.get("success", True))
+        fail = len(hidden) - ok
+        summary = Text("\u2502 ", style=BORDER)
+        summary.append(f"\u2713 {ok} completed", style="dim green")
+        if fail > 0:
+            summary.append(f" | {fail} failed", style="dim red")
+        elements.append(summary)
+
+    for tc, tr in visible:
         tc_line = Text("\u2502 ", style=BORDER)
         tc_name = format_tool_compact(tc["name"], tc.get("args"))
         if tr.get("success", True):
@@ -249,7 +265,14 @@ def _render_subagent_section(sa: 'SubAgentState', compact: bool = False) -> list
                 continue
         elements.append(tc_line)
 
-    # Pending/running tools
+    # Pending/running tools — limit visible
+    hidden_running = len(pending) - MAX_SA_RUNNING
+    if hidden_running > 0:
+        run_summary = Text("\u2502 ", style=BORDER)
+        run_summary.append(f"\u25cf {hidden_running} more running...", style="dim yellow")
+        elements.append(run_summary)
+        pending = pending[-MAX_SA_RUNNING:]
+
     for tc in pending:
         tc_line = Text("\u2502 ", style=BORDER)
         tc_name = format_tool_compact(tc["name"], tc.get("args"))
@@ -339,7 +362,7 @@ def create_streaming_display(
 
     # Initial waiting state
     if is_waiting and not thinking_text and not response_text and not tool_calls:
-        elements.append(Text("Thinking...", style="cyan"))
+        elements.append(Spinner("dots", text=" Thinking...", style="cyan"))
         return Group(*elements)
 
     # Thinking panel
@@ -420,7 +443,7 @@ def create_streaming_display(
 
         for tc, tr in running_regular:
             elements.append(_render_tool_call_line(tc, tr))
-            elements.append(Text(" Running...", style="yellow"))
+            elements.append(Spinner("dots", text=" Running...", style="yellow"))
 
         # Task tool calls are rendered as part of sub-agent sections below
 
@@ -466,7 +489,7 @@ def create_streaming_display(
         # Check if any sub-agent is active
         any_active = any(sa.is_active for sa in subagents)
         if not any_active:
-            elements.append(Text(" Analyzing results...", style="cyan"))
+            elements.append(Spinner("dots", text=" Analyzing results...", style="cyan"))
 
     # Final response -- render as streaming Markdown whenever all tools are done.
     # The Live display is transient; display_final_results() re-renders the
@@ -635,9 +658,6 @@ def _run_streaming(
 
     async def _consume() -> None:
         nonlocal _thinking_sent, _todo_sent
-        # Manual refresh pacing: max 10Hz (every 100ms)
-        refresh_interval = 0.1
-        last_refresh = 0.0
         async for event in stream_agent_events(agent, message, thread_id, metadata=metadata):
             event_type = state.handle_event(event)
 
@@ -709,10 +729,6 @@ def _run_streaming(
                 **state.get_display_args(),
                 show_thinking=show_thinking,
             ))
-            now = loop.time()
-            if now - last_refresh >= refresh_interval:
-                live.refresh()
-                last_refresh = now
 
     with Live(console=console, auto_refresh=False, transient=True) as live:
         live.update(create_streaming_display(is_waiting=True))
@@ -721,8 +737,28 @@ def _run_streaming(
         except RuntimeError:
             # No current event loop
             loop = _create_event_loop()
-        loop.run_until_complete(_consume())
-        live.refresh()
+
+        async def _run_with_refresh() -> None:
+            async def _periodic_refresh() -> None:
+                try:
+                    while True:
+                        await asyncio.sleep(0.1)
+                        live.refresh()
+                except asyncio.CancelledError:
+                    pass
+
+            refresh_task = asyncio.ensure_future(_periodic_refresh())
+            try:
+                await _consume()
+            finally:
+                refresh_task.cancel()
+                try:
+                    await refresh_task
+                except asyncio.CancelledError:
+                    pass
+                live.refresh()
+
+        loop.run_until_complete(_run_with_refresh())
 
     # Flush any remaining thinking that wasn't sent during streaming
     if on_thinking and not _thinking_sent and state.thinking_text:
