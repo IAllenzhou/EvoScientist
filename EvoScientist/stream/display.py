@@ -804,7 +804,7 @@ def _run_streaming(
             async def _periodic_refresh() -> None:
                 try:
                     while True:
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.05)
                         live.refresh()
                 except asyncio.CancelledError:
                     pass
