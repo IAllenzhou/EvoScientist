@@ -98,6 +98,8 @@ class StreamState:
         self.total_output_tokens = 0
         # HITL interrupt tracking
         self.pending_interrupt: dict | None = None
+        # ask_user interrupt tracking
+        self.pending_ask_user: dict | None = None
         # Cached Markdown object for Rich CLI display (avoids O(n²) re-parsing)
         self._cached_md_text: str = ""
         self._cached_md: object | None = None
@@ -259,6 +261,9 @@ class StreamState:
 
         elif event_type == "interrupt":
             self.pending_interrupt = event
+
+        elif event_type == "ask_user":
+            self.pending_ask_user = event
 
         elif event_type == "summarization":
             self.summarization_text = event.get("content", "")

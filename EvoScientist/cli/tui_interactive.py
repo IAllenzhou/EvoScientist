@@ -72,6 +72,18 @@ def _shorten_path(path: str) -> str:
     return _sp(path)
 
 
+def _channel_ask_user_prompt_from_event(event: dict, channel_hitl_fn: Any) -> dict:
+    """Bridge ask_user event to channel prompt (called via asyncio.to_thread).
+
+    This is a thin wrapper used by TUI channel mode — it delegates to the
+    channel module's ``channel_ask_user_prompt`` if available, otherwise
+    returns a cancelled result.
+    """
+    from .channel import channel_ask_user_prompt as _ch_ask
+
+    return _ch_ask(event)
+
+
 def _build_welcome_banner(
     *,
     thread_id: str,
@@ -308,6 +320,7 @@ def run_textual_interactive(
             self._comp_index: int = -1
             self._hitl_auto_approve: bool = False
             self._approval_future: asyncio.Future | None = None
+            self._ask_user_future: asyncio.Future | None = None
             self._picker_future: asyncio.Future | None = None
             self._history_suggester = HistorySuggester(get_config_dir() / "history")
 
@@ -418,6 +431,32 @@ def run_textual_interactive(
             """Handle ApprovalWidget.Decided message."""
             if self._approval_future and not self._approval_future.done():
                 self._approval_future.set_result(event)
+
+        async def _wait_for_ask_user(self, ask_w) -> dict:
+            """Wait for the interactive ask_user widget to resolve via Future.
+
+            Returns ``{"answers": [...], "status": "answered"}``
+            or ``{"status": "cancelled"}``.
+            """
+            loop = asyncio.get_running_loop()
+            self._ask_user_future = loop.create_future()
+            ask_w.set_future(self._ask_user_future)
+
+            try:
+                result = await asyncio.wait_for(self._ask_user_future, timeout=300)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                ask_w.action_cancel()
+                return {"status": "cancelled"}
+            finally:
+                self._ask_user_future = None
+
+            if not isinstance(result, dict):
+                return {"status": "cancelled"}
+
+            result_type = result.get("type", "")
+            if result_type == "answered":
+                return {"answers": result.get("answers", []), "status": "answered"}
+            return {"status": "cancelled"}
 
         async def _wait_for_thread_pick(self, picker_widget) -> str | None:
             """Wait for user to pick a thread from ThreadPickerWidget.
@@ -605,7 +644,12 @@ def run_textual_interactive(
 
             for _hitl_round in range(_MAX_HITL_ROUNDS):
                 state.pending_interrupt = None
+                state.pending_ask_user = None
                 _hitl_resuming = False
+                # Reset per-round widgets so resumed streams get fresh ones
+                if _hitl_round > 0:
+                    thinking_w = None
+                    summarization_w = None
                 try:
                     async for event in stream_agent_events(
                         self._agent,
@@ -848,6 +892,38 @@ def run_textual_interactive(
                             if sa_w is not None:
                                     sa_w.finalize()
 
+                        elif event_type == "ask_user":
+                            questions = event.get("questions", [])
+                            if questions:
+                                # Channel messages: use channel-based text prompt
+                                if channel_hitl_fn is not None:
+                                    self._append_system(
+                                        "Waiting for channel user input...",
+                                        style="dim italic",
+                                    )
+                                    result = await asyncio.to_thread(
+                                        lambda: _channel_ask_user_prompt_from_event(event, channel_hitl_fn),
+                                    )
+                                else:
+                                    # Interactive TUI: display widget, collect via arrow keys
+                                    from .widgets.ask_user_widget import AskUserWidget
+                                    _prompt = self.query_one("#prompt", Input)
+                                    _prompt.disabled = True
+                                    ask_w = AskUserWidget(questions)
+                                    await container.mount(ask_w)
+                                    _schedule_scroll()
+                                    self.call_after_refresh(ask_w.focus_active)
+                                    result = await self._wait_for_ask_user(ask_w)
+                                    try:
+                                        await ask_w.remove()
+                                    except Exception:
+                                        pass
+                                    _prompt.disabled = False
+                                from langgraph.types import Command  # type: ignore[import-untyped]
+                                _stream_input = Command(resume=result)
+                                _hitl_resuming = True
+                                break  # re-enter outer HITL loop
+
                         elif event_type == "interrupt":
                             action_reqs = event.get("action_requests", [])
                             n = len(action_reqs) or 1
@@ -885,12 +961,16 @@ def run_textual_interactive(
                                     continue
 
                             # Interactive TUI: mount approval widget
+                            # Disable main prompt so it can't steal focus
+                            _prompt = self.query_one("#prompt", Input)
+                            _prompt.disabled = True
                             from .widgets.approval_widget import ApprovalWidget
                             approval_w = ApprovalWidget(action_reqs)
                             await container.mount(approval_w)
                             _schedule_scroll()
                             decided_event = await self._wait_for_approval(approval_w)
                             await approval_w.remove()
+                            _prompt.disabled = False
                             if decided_event and decided_event.decisions is not None:
                                     if decided_event.auto_approve_session:
                                         self._hitl_auto_approve = True
@@ -1019,8 +1099,8 @@ def run_textual_interactive(
                             ),
                         )
 
-                # HITL: if interrupt was handled, loop back to resume stream
-                if state.pending_interrupt is None:
+                # HITL / ask_user: if interrupt was handled, loop back to resume stream
+                if state.pending_interrupt is None and state.pending_ask_user is None:
                     break  # normal completion or rejection — exit HITL loop
                 # Otherwise _stream_input was set to Command(resume=...)
                 # by the interrupt handler above; loop continues.
@@ -1166,6 +1246,7 @@ def run_textual_interactive(
             text = event.value.strip()
             prompt = self.query_one("#prompt", Input)
             prompt.value = ""
+
             if not text:
                 return
 
@@ -1225,6 +1306,17 @@ def run_textual_interactive(
 
         def action_cancel_queued(self) -> None:
             """Cancel the last queued message on Esc."""
+            # Cancel ask_user if active (widget handles Escape internally,
+            # but this is a safety fallback)
+            if self._ask_user_future and not self._ask_user_future.done():
+                try:
+                    from .widgets.ask_user_widget import AskUserWidget
+                    ask_w = self.query_one(AskUserWidget)
+                    ask_w.action_cancel()
+                except Exception:
+                    # Force-resolve the future
+                    self._ask_user_future.set_result({"type": "cancelled"})
+                return
             # Delegate to ApprovalWidget or ThreadPickerWidget if focused
             focused = self.focused
             if focused is not None:
@@ -1242,12 +1334,16 @@ def run_textual_interactive(
 
         def action_edit_queued(self) -> None:
             """Pop the last queued message back into input for editing."""
-            # Skip if an ApprovalWidget or ThreadPickerWidget has focus
+            # Skip if an ApprovalWidget, AskUserWidget, or ThreadPickerWidget has focus
             focused = self.focused
             if focused is not None:
                 from .widgets.approval_widget import ApprovalWidget
+                from .widgets.ask_user_widget import AskUserWidget
                 from .widgets.thread_selector import ThreadPickerWidget
                 if isinstance(focused, ApprovalWidget):
+                    focused.action_move_up()
+                    return
+                if isinstance(focused, AskUserWidget):
                     focused.action_move_up()
                     return
                 if isinstance(focused, ThreadPickerWidget):
@@ -1262,12 +1358,16 @@ def run_textual_interactive(
                 self._render_queue_indicator()
 
         def action_down_delegate(self) -> None:
-            """Delegate down key to focused ApprovalWidget or ThreadPickerWidget."""
+            """Delegate down key to focused ApprovalWidget, AskUserWidget, or ThreadPickerWidget."""
             focused = self.focused
             if focused is not None:
                 from .widgets.approval_widget import ApprovalWidget
+                from .widgets.ask_user_widget import AskUserWidget
                 from .widgets.thread_selector import ThreadPickerWidget
                 if isinstance(focused, ApprovalWidget):
+                    focused.action_move_down()
+                    return
+                if isinstance(focused, AskUserWidget):
                     focused.action_move_down()
                     return
                 if isinstance(focused, ThreadPickerWidget):

@@ -67,6 +67,7 @@ def run_streaming(
     on_file_write: Callable[[str], None] | None = None,
     metadata: dict | None = None,
     hitl_prompt_fn: Callable[[list], list[dict] | None] | None = None,
+    ask_user_prompt_fn: Callable[[dict], dict] | None = None,
 ) -> str:
     """Run streaming with the selected backend."""
     backend = get_backend(ui_backend, warn_fallback=True)
@@ -82,6 +83,7 @@ def run_streaming(
             on_file_write=on_file_write,
             metadata=metadata,
             hitl_prompt_fn=hitl_prompt_fn,
+            ask_user_prompt_fn=ask_user_prompt_fn,
         )
     except RuntimeError:
         requested = normalize_ui_backend(ui_backend)
@@ -100,5 +102,6 @@ def run_streaming(
                 on_file_write=on_file_write,
                 metadata=metadata,
                 hitl_prompt_fn=hitl_prompt_fn,
+                ask_user_prompt_fn=ask_user_prompt_fn,
             )
         raise

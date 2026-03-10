@@ -110,6 +110,18 @@ class StreamEventEmitter:
         })
 
     @staticmethod
+    def ask_user_interrupt(
+        interrupt_id: str, questions: list, tool_call_id: str = "",
+    ) -> StreamEvent:
+        """Agent-initiated ask_user interrupt event."""
+        return StreamEvent("ask_user", {
+            "type": "ask_user",
+            "interrupt_id": interrupt_id,
+            "questions": questions,
+            "tool_call_id": tool_call_id,
+        })
+
+    @staticmethod
     def summarization(content: str) -> StreamEvent:
         """Context summarization event."""
         return StreamEvent("summarization", {"type": "summarization", "content": content})

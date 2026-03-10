@@ -864,6 +864,69 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
         loop = _create_event_loop()
     return loop
 
+def _resolve_ask_user_prompt(ask_user_data: dict) -> dict:
+    """Interactive console Q&A for ask_user events.
+
+    Presents questions via ``prompt_toolkit.prompt()`` (not ``input()``)
+    for proper CJK IME support and styled prompts without cursor drift.
+    """
+    from prompt_toolkit import prompt as pt_prompt  # type: ignore[import-untyped]
+    from prompt_toolkit.formatted_text import HTML  # type: ignore[import-untyped]
+
+    questions = ask_user_data.get("questions", [])
+    if not questions:
+        return {"answers": [], "status": "answered"}
+
+    console.print()
+    console.print(Panel(
+        Text("Quick check-in from EvoScientist", style="bold"),
+        border_style="cyan",
+        padding=(0, 1),
+    ))
+    console.print()
+
+    answers: list[str] = []
+    try:
+        for i, q in enumerate(questions):
+            q_text = q.get("question", "")
+            q_type = q.get("type", "text")
+            required = q.get("required", True)
+            tag = " [dim](optional)[/dim]" if not required else ""
+            console.print(f"  [bold]{i + 1}. {q_text}[/bold]{tag}")
+
+            if q_type == "multiple_choice":
+                choices = q.get("choices", [])
+                for j, choice in enumerate(choices):
+                    label = choice.get("value", str(choice))
+                    letter = chr(ord("A") + j)
+                    console.print(Text(f"     {letter}. {label}", style="dim"))
+                other_letter = chr(ord("A") + len(choices))
+                console.print(Text(f"     {other_letter}. Other (type your answer)", style="dim"))
+
+                letters = "/".join(chr(ord("A") + k) for k in range(len(choices) + 1))
+                raw = pt_prompt(HTML(f"  <b><style fg='#1565c0'>Choice [{letters}]:</style></b> ")).strip()
+                if raw.upper() == other_letter:
+                    raw = pt_prompt(HTML("  <b><style fg='#42a5f5'>&gt; Your answer:</style></b> ")).strip()
+                    answers.append(raw)
+                elif len(raw) == 1 and raw.upper().isalpha():
+                    idx = ord(raw.upper()) - ord("A")
+                    if 0 <= idx < len(choices):
+                        answers.append(choices[idx].get("value", raw))
+                    else:
+                        answers.append(raw)
+                else:
+                    answers.append(raw)
+            else:
+                raw = pt_prompt(HTML("  <b><style fg='#42a5f5'>&gt; Answer:</style></b> ")).strip()
+                answers.append(raw)
+            console.print()
+    except (EOFError, KeyboardInterrupt):
+        console.print("[dim]  Cancelled.[/dim]")
+        return {"status": "cancelled"}
+
+    return {"answers": answers, "status": "answered"}
+
+
 def _run_streaming(
     agent: Any,
     message: Any,
@@ -875,6 +938,7 @@ def _run_streaming(
     on_file_write: Callable[[str], None] | None = None,
     metadata: dict | None = None,
     hitl_prompt_fn: Callable[[list], list[dict] | None] | None = None,
+    ask_user_prompt_fn: Callable[[dict], dict] | None = None,
     *,
     _state: StreamState | None = None,
     _hitl_depth: int = 0,
@@ -1015,9 +1079,9 @@ def _run_streaming(
                 except asyncio.CancelledError:
                     pass
                 # Render clean final frame before Live exits (no spinners, expanded tools)
-                if state.pending_interrupt is not None:
+                if state.pending_interrupt is not None or state.pending_ask_user is not None:
                     # Interrupted: render current state (not final) so it
-                    # looks continuous when approval prompt appears.
+                    # looks continuous when prompt appears.
                     final_display = create_streaming_display(
                         **state.get_display_args(),
                         show_thinking=show_thinking,
@@ -1050,6 +1114,31 @@ def _run_streaming(
         if len(state.thinking_text) >= _MIN_THINKING_LEN:
             on_thinking(state.thinking_text.rstrip())
 
+    # ask_user: check before HITL (ask_user uses the same resume loop)
+    if state.pending_ask_user is not None and _hitl_depth < _MAX_HITL_ITERATIONS:
+        if ask_user_prompt_fn is not None:
+            result = ask_user_prompt_fn(state.pending_ask_user)
+        else:
+            result = _resolve_ask_user_prompt(state.pending_ask_user)
+        from langgraph.types import Command  # type: ignore[import-untyped]
+        state.pending_ask_user = None
+        return _run_streaming(
+            agent=agent,
+            message=Command(resume=result),
+            thread_id=thread_id,
+            show_thinking=show_thinking,
+            interactive=interactive,
+            on_thinking=on_thinking,
+            on_todo=on_todo,
+            on_file_write=on_file_write,
+            metadata=metadata,
+            hitl_prompt_fn=hitl_prompt_fn,
+            ask_user_prompt_fn=ask_user_prompt_fn,
+            _state=state,
+            _hitl_depth=_hitl_depth + 1,
+            _media_sent=_media_sent,
+        )
+
     # HITL: check for pending interrupt and handle approval
     if state.pending_interrupt is not None and _hitl_depth < _MAX_HITL_ITERATIONS:
         decisions = _resolve_hitl_approval(
@@ -1069,6 +1158,7 @@ def _run_streaming(
                 on_file_write=on_file_write,
                 metadata=metadata,
                 hitl_prompt_fn=hitl_prompt_fn,
+                ask_user_prompt_fn=ask_user_prompt_fn,
                 _state=state,
                 _hitl_depth=_hitl_depth + 1,
                 _media_sent=_media_sent,

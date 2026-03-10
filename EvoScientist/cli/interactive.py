@@ -534,6 +534,10 @@ def cmd_interactive(
                     """Send HITL approval prompt to channel user and wait for reply."""
                     return _ch_mod.channel_hitl_prompt(action_requests, msg)
 
+                def _channel_ask_user(ask_user_data: dict) -> dict:
+                    """Send ask_user questions to channel user and wait for reply."""
+                    return _ch_mod.channel_ask_user_prompt(ask_user_data, msg)
+
                 meta = build_metadata(state["workspace_dir"], model)
                 try:
                     response = run_streaming(
@@ -548,6 +552,7 @@ def cmd_interactive(
                         on_todo=_send_todo_to_channel,
                         on_file_write=_send_media_to_channel,
                         hitl_prompt_fn=_channel_hitl_prompt,
+                        ask_user_prompt_fn=_channel_ask_user,
                     )
                 except Exception as e:
                     response = f"Error: {e}"

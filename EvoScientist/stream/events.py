@@ -326,7 +326,7 @@ async def stream_agent_events(
             else:
                 continue
 
-            # Parse HITL interrupts from updates mode
+            # Parse HITL / ask_user interrupts from updates mode
             if mode_str == "updates":
                 if isinstance(data, dict) and "__interrupt__" in data:
                     for interrupt_obj in data["__interrupt__"]:
@@ -334,6 +334,30 @@ async def stream_agent_events(
                             interrupt_value = interrupt_obj.get("value", {})
                         else:
                             interrupt_value = getattr(interrupt_obj, "value", {})
+
+                        # Discriminate ask_user vs HITL interrupts
+                        iv_type = (
+                            interrupt_value.get("type")
+                            if isinstance(interrupt_value, dict)
+                            else getattr(interrupt_value, "type", None)
+                        )
+                        if iv_type == "ask_user":
+                            questions = (
+                                interrupt_value.get("questions", [])
+                                if isinstance(interrupt_value, dict)
+                                else getattr(interrupt_value, "questions", [])
+                            )
+                            tc_id = (
+                                interrupt_value.get("tool_call_id", "")
+                                if isinstance(interrupt_value, dict)
+                                else getattr(interrupt_value, "tool_call_id", "")
+                            )
+                            ns_parts = interrupt_obj.get("ns", [""]) if isinstance(interrupt_obj, dict) else getattr(interrupt_obj, "ns", [""])
+                            interrupt_id = str(ns_parts[0]) if ns_parts else "default"
+                            yield emitter.ask_user_interrupt(interrupt_id, questions, tc_id).data
+                            continue
+
+                        # Standard HITL approval interrupt
                         if isinstance(interrupt_value, dict):
                             action_reqs = interrupt_value.get("action_requests", [])
                             review_cfgs = interrupt_value.get("review_configs", [])

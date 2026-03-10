@@ -181,6 +181,9 @@ class EvoScientistConfig:
     auto_approve: bool = False  # Auto-approve all tool executions without prompting
     shell_allow_list: str = ""  # Comma-separated shell command prefixes to auto-approve
 
+    # Agent features
+    enable_ask_user: bool = True  # Enable ask_user tool for agent-initiated questions
+
     # DM access control policy
     dm_policy: str = "allowlist"
 

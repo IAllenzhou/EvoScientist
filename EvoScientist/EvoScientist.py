@@ -275,11 +275,16 @@ def _get_default_middleware():
     """Build the default middleware list."""
     from .middleware import create_memory_middleware, ToolErrorHandlerMiddleware
 
+    cfg = _ensure_config()
     memory_dir = str(_paths_mod.MEMORY_DIR)
-    return [
+    mw = [
         ToolErrorHandlerMiddleware(),
         create_memory_middleware(memory_dir, extraction_model=_ensure_chat_model()),
     ]
+    if cfg.enable_ask_user and not cfg.auto_approve:
+        from .middleware.ask_user import AskUserMiddleware
+        mw.insert(0, AskUserMiddleware())
+    return mw
 
 
 def _get_default_agent():
@@ -389,6 +394,9 @@ def create_cli_agent(workspace_dir: str | None = None, checkpointer=None, config
         ToolErrorHandlerMiddleware(),
         create_memory_middleware(_mem_dir, extraction_model=_ensure_chat_model()),
     ]
+    if cfg.enable_ask_user and not cfg.auto_approve:
+        from .middleware.ask_user import AskUserMiddleware
+        mw.insert(0, AskUserMiddleware())
 
     # Re-load MCP tools from current config (picks up /mcp add changes)
     kwargs = load_mcp_and_build_kwargs(be, mw)

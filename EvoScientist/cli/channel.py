@@ -122,6 +122,127 @@ def _try_set_hitl_reply(channel_type: str, chat_id: str, content: str) -> bool:
     return False
 
 
+def channel_ask_user_prompt(
+    ask_user_data: dict,
+    msg: "ChannelMessage | None" = None,
+) -> dict:
+    """Format ask_user questions and collect answers from a channel user.
+
+    If *msg* is provided, sends questions via the bus and waits for a reply.
+    Otherwise falls back to returning a cancelled result.
+
+    Returns:
+        ``{"answers": [...], "status": "answered"}`` or
+        ``{"status": "cancelled"}``.
+    """
+    from ..channels.bus.events import OutboundMessage
+
+    questions = ask_user_data.get("questions", [])
+    if not questions:
+        return {"answers": [], "status": "answered"}
+
+    if msg is None or not msg.bus_ref:
+        return {"status": "cancelled"}
+
+    bus_loop = _bus_loop
+    if not bus_loop:
+        return {"status": "cancelled"}
+
+    def _send(content: str) -> bool:
+        try:
+            asyncio.run_coroutine_threadsafe(
+                msg.bus_ref.publish_outbound(OutboundMessage(
+                    channel=msg.channel_type,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=msg.metadata,
+                )),
+                bus_loop,
+            ).result(timeout=15)
+            return True
+        except Exception as exc:
+            _channel_logger.debug("ask_user send failed: %s", exc)
+            return False
+
+    # Ask one question at a time (consistent with Rich CLI / TUI)
+    total = len(questions)
+    answers: list[str] = []
+
+    for i, q in enumerate(questions):
+        q_text = q.get("question", "")
+        q_type = q.get("type", "text")
+        required = q.get("required", True)
+
+        # Format single question
+        if total == 1:
+            header = "\u2753 Quick check-in from EvoScientist\n"
+        else:
+            header = f"\u2753 Question {i + 1}/{total}\n"
+
+        lines = [header, f"{i + 1}. {q_text}"]
+        if not required:
+            lines[-1] += " (optional)"
+
+        if q_type == "multiple_choice":
+            choices = q.get("choices", [])
+            for j, choice in enumerate(choices):
+                label = choice.get("value", str(choice))
+                letter = chr(ord("A") + j)
+                lines.append(f"   {letter}. {label}")
+            other_letter = chr(ord("A") + len(choices))
+            lines.append(f"   {other_letter}. Other")
+            lines.append(f"\nReply with a letter ({'/'.join(chr(ord('A') + k) for k in range(len(choices) + 1))}), or 'cancel'.")
+        else:
+            skip_hint = " Leave empty to skip." if not required else ""
+            lines.append(f"\nReply with your answer, or 'cancel'.{skip_hint}")
+
+        if not _send("\n".join(lines)):
+            return {"status": "cancelled"}
+
+        # Wait for reply
+        hitl_event = _register_hitl_wait(msg.channel_type, msg.chat_id)
+        replied = hitl_event.wait(timeout=_HITL_APPROVAL_TIMEOUT)
+        reply_text = _pop_hitl_reply(msg.channel_type, msg.chat_id)
+
+        if not replied or not reply_text:
+            _send("\u23f0 Response timed out.")
+            return {"status": "cancelled"}
+
+        raw = reply_text.strip()
+        if raw.lower() == "cancel":
+            return {"status": "cancelled"}
+
+        # Parse answer
+        if q_type == "multiple_choice":
+            choices = q.get("choices", [])
+            other_letter = chr(ord("A") + len(choices))
+            if len(raw) == 1 and raw.upper() == other_letter:
+                # Other selected — ask for free-form input
+                if not _send("Please type your answer:"):
+                    return {"status": "cancelled"}
+                hitl_event = _register_hitl_wait(msg.channel_type, msg.chat_id)
+                replied = hitl_event.wait(timeout=_HITL_APPROVAL_TIMEOUT)
+                other_text = _pop_hitl_reply(msg.channel_type, msg.chat_id)
+                if not replied or not other_text:
+                    _send("\u23f0 Response timed out.")
+                    return {"status": "cancelled"}
+                if other_text.strip().lower() == "cancel":
+                    return {"status": "cancelled"}
+                answers.append(other_text.strip())
+            elif len(raw) == 1 and raw.upper().isalpha():
+                idx = ord(raw.upper()) - ord("A")
+                if 0 <= idx < len(choices):
+                    answers.append(choices[idx].get("value", raw))
+                else:
+                    answers.append(raw)
+            else:
+                answers.append(raw)
+        else:
+            answers.append(raw)
+
+    return {"answers": answers, "status": "answered"}
+
+
 def channel_hitl_prompt(
     action_requests: list,
     msg: "ChannelMessage",

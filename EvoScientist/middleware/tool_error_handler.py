@@ -21,6 +21,12 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
+# GraphInterrupt must propagate — never catch it as a tool error.
+try:
+    from langgraph.errors import GraphInterrupt as _GraphInterrupt
+except ImportError:  # older langgraph versions
+    _GraphInterrupt = None  # type: ignore[assignment,misc]
+
 if TYPE_CHECKING:
     from langchain.agents.middleware.types import ToolCallRequest
 
@@ -39,7 +45,9 @@ class ToolErrorHandlerMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command[Any]:
         try:
             return handler(request)
-        except Exception:
+        except Exception as exc:
+            if _GraphInterrupt is not None and isinstance(exc, _GraphInterrupt):
+                raise
             return _build_error_message(request)
 
     async def awrap_tool_call(
@@ -49,7 +57,9 @@ class ToolErrorHandlerMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command[Any]:
         try:
             return await handler(request)
-        except Exception:
+        except Exception as exc:
+            if _GraphInterrupt is not None and isinstance(exc, _GraphInterrupt):
+                raise
             return _build_error_message(request)
 
 

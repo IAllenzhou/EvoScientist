@@ -202,6 +202,7 @@ def serve(
     no_thinking: bool = typer.Option(False, "--no-thinking", help="Disable thinking relay to channels"),
     workdir: Optional[str] = typer.Option(None, "--workdir", help="Override workspace directory"),
     auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions without prompting"),
+    ask_user: bool = typer.Option(False, "--ask-user", help="Enable agent to ask clarifying questions about your research preferences"),
 ):
     """Run EvoScientist in headless mode -- channels only, no interactive prompt.
 
@@ -219,6 +220,8 @@ def serve(
     cli_overrides = {}
     if auto_approve:
         cli_overrides["auto_approve"] = True
+    if ask_user:
+        cli_overrides["enable_ask_user"] = True
     config = get_effective_config(cli_overrides)
     apply_config_to_env(config)
 
@@ -539,6 +542,7 @@ def _main_callback(
     use_cwd: bool = typer.Option(False, "--use-cwd", help="Use current working directory as workspace"),
     no_thinking: bool = typer.Option(False, "--no-thinking", help="Disable thinking display"),
     auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions without prompting"),
+    ask_user: bool = typer.Option(False, "--ask-user", help="Enable agent to ask clarifying questions about your research preferences"),
     ui: Optional[str] = typer.Option(
         None,
         "--ui",
@@ -569,6 +573,8 @@ def _main_callback(
         cli_overrides["ui_backend"] = ui
     if auto_approve:
         cli_overrides["auto_approve"] = True
+    if ask_user:
+        cli_overrides["enable_ask_user"] = True
 
     config = get_effective_config(cli_overrides)
     apply_config_to_env(config)
