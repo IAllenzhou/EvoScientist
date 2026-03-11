@@ -403,4 +403,23 @@ class CustomSandboxBackend(LocalShellBackend):
             )
 
         # Delegate to parent for subprocess execution
-        return super().execute(command, timeout=timeout)
+        response = super().execute(command, timeout=timeout)
+
+        # Enhance timeout errors with actionable recovery guidance
+        if response.exit_code == 124:
+            cmd_words = command.split()
+            grep_hint = cmd_words[0] if cmd_words else "process"
+            bg_cmd = f"{command} > /output.log 2>&1 &"
+            response = ExecuteResponse(
+                output=(
+                    f"{response.output}\n\n"
+                    f"Recovery: re-run in background to avoid the sandbox timeout:\n"
+                    f"  {bg_cmd}\n"
+                    f"Then check progress: ps aux | grep {grep_hint}\n"
+                    f"Read results: cat /output.log"
+                ),
+                exit_code=response.exit_code,
+                truncated=response.truncated,
+            )
+
+        return response

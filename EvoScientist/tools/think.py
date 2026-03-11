@@ -25,7 +25,7 @@ def think_tool(reflection: str) -> str:
        Would a critical reviewer accept it, or are there gaps to fill?
     3. Skills leverage — Is there an installed skill that provides a structured
        workflow for what I'm doing? Check your available skills listing and read
-       the relevant SKILL.md for full instructions. Skills cover various research
+       the relevant `SKILL.md` for full instructions. Skills cover various research
        phases — ideation, experiment execution, paper writing, review, and more.
        Follow a skill's workflow rather than improvising when one is available.
     4. Prior knowledge — Have I checked research memory before starting?
@@ -38,10 +38,16 @@ def think_tool(reflection: str) -> str:
        something different? What evidence supports this decision?
     6. Handoff — Is this phase complete? What artifacts and results does the
        next phase or the caller need? Am I leaving clear, well-organized outputs?
+    7. Resource & compute — Before heavy operations (training, large evals),
+       estimate runtime and memory. The sandbox has a 300s execution timeout
+       and 100KB output limit. For tasks likely exceeding these, plan background
+       execution with log files. After a timeout or OOM, reflect on whether to
+       retry with reduced parameters (smaller model, fewer epochs, data subset)
+       or switch to background execution.
 
-    Not every reflection needs all six dimensions. Pick the ones relevant to
+    Not every reflection needs all seven dimensions. Pick the ones relevant to
     the current moment. A focused two or three dimension reflection is better
-    than a shallow pass over all six.
+    than a shallow pass over all seven.
 
     Args:
         reflection: Your structured reflection addressing the relevant dimensions above

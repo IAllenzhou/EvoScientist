@@ -367,3 +367,31 @@ class TestPipelineCommandValidation:
     def test_quoted_pipe_not_split(self):
         """Pipe inside quotes is not a shell operator."""
         assert validate_command("echo 'hello | world'") is None
+
+
+# === execute() timeout recovery guidance ===
+
+class TestExecuteTimeoutRecovery:
+    def test_timeout_includes_recovery_guidance(self, tmp_workspace):
+        backend = CustomSandboxBackend(root_dir=tmp_workspace, timeout=1)
+        resp = backend.execute("sleep 10")
+        assert resp.exit_code == 124
+        assert "Recovery" in resp.output
+        assert "background" in resp.output.lower()
+
+    def test_timeout_includes_background_command(self, tmp_workspace):
+        backend = CustomSandboxBackend(root_dir=tmp_workspace, timeout=1)
+        resp = backend.execute("sleep 10")
+        assert "sleep 10" in resp.output
+        assert "> /output.log 2>&1 &" in resp.output
+
+    def test_timeout_preserves_original_error(self, tmp_workspace):
+        backend = CustomSandboxBackend(root_dir=tmp_workspace, timeout=1)
+        resp = backend.execute("sleep 10")
+        assert "timed out" in resp.output.lower()
+
+    def test_non_timeout_not_enhanced(self, tmp_workspace):
+        backend = CustomSandboxBackend(root_dir=tmp_workspace)
+        resp = backend.execute("python3 -c 'raise SystemExit(1)'")
+        assert resp.exit_code == 1
+        assert "Recovery" not in resp.output

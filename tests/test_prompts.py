@@ -28,3 +28,10 @@ class TestGetSystemPrompt:
     def test_delegation_no_placeholders(self):
         assert "{max_concurrent}" not in DELEGATION_STRATEGY
         assert "{max_iterations}" not in DELEGATION_STRATEGY
+
+    def test_shell_guidelines_mention_timeout_limit(self):
+        assert "300" in EXPERIMENT_WORKFLOW
+        assert "124" in EXPERIMENT_WORKFLOW
+
+    def test_shell_guidelines_mention_background(self):
+        assert "background" in EXPERIMENT_WORKFLOW.lower()

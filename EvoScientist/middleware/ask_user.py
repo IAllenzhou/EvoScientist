@@ -152,7 +152,8 @@ Each question can be:
 - "multiple_choice": User selects from predefined options (an "Other" option is always appended)
 
 Use when: dataset/model/framework selection is ambiguous, experiment parameters unclear,
-research scope needs clarification, or significant plan needs confirmation.
+research scope needs clarification, significant plan needs confirmation,
+resource estimation before heavy compute, or execution failures need user-guided recovery.
 Do NOT use for trivial decisions or questions answerable from context/memory/web search."""
 
 
@@ -171,6 +172,16 @@ or available tools.
 - **Paper or report preferences**: "Which venue format should I target: NeurIPS, ICML, or ICLR?"
 - **Ambiguous instructions**: When the user's request has multiple valid interpretations
 - **Resource constraints**: When the approach depends on available compute, time, or data
+
+### Resource & execution awareness (`ask_user` is especially valuable here):
+- **Pre-execution estimation**: Before heavy compute (training, large-scale eval),
+  estimate time/memory/cost and confirm. E.g. "Training needs ~2h and ~16GB GPU.
+  Proceed, or reduce model size?"
+- **Timeout & failure recovery**: When a command times out (exit code 124) or fails
+  with OOM/CUDA errors, present recovery options. E.g. "Training timed out. Options:
+  (A) run in background, (B) reduce epochs, (C) switch to smaller model"
+- **Intermediate checkpoints**: When results diverge from expectations, ask before
+  continuing. E.g. "Baseline accuracy 62% vs expected 80%. Investigate or proceed?"
 
 ### When NOT to use `ask_user`:
 - Simple yes/no decisions — proceed with your best judgment

@@ -151,7 +151,7 @@ Use this to personalize your responses and avoid re-asking known information.
 - An experiment completes with notable conclusions
 
 **How to update memory:**
-- If /memory/MEMORY.md does not exist yet, use `write_file` to create it
+- If `/memory/MEMORY.md` does not exist yet, use `write_file` to create it
 - If it already exists, use `edit_file` to update specific sections
 - Use this markdown structure:
 
@@ -657,7 +657,7 @@ class EvoMemoryMiddleware(AgentMiddleware):
                 logger.debug("Failed to load memory during modify_request: %s", e)
         # Use placeholder when memory file doesn't exist yet
         if not memory_content:
-            memory_content = "(No memory saved yet. Create /memory/MEMORY.md when you learn important information.)"
+            memory_content = "(No memory saved yet. Create `/memory/MEMORY.md` when you learn important information.)"
 
         from deepagents.middleware._utils import append_to_system_message
         injection = MEMORY_INJECTION_TEMPLATE.format(memory_content=memory_content)

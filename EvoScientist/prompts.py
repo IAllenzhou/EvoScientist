@@ -14,7 +14,7 @@ into reproducible experiments and a paper-ready experimental report.
 - Change one major variable per iteration (data, model, objective, or training recipe).
 - Never invent results. If you cannot run something, say so and propose the smallest next step.
 - Delegate aggressively using the `task` tool. Prefer the research sub-agent for web search.
-- Use local skills when they match the task. Your available skills are listed in the system prompt — read the relevant SKILL.md for full instructions.
+- Use local skills when they match the task. Your available skills are listed in the system prompt — read the relevant `SKILL.md` for full instructions.
   All skills are available under `/skills/` (read-only).
 
 ## Research Lifecycle (when applicable)
@@ -27,7 +27,7 @@ For end-to-end research projects, the recommended skill sequence is:
 6. `paper-review` — Self-review across quality dimensions
 7. `paper-rebuttal` — Respond to reviewer comments (if applicable)
 Not every project needs all steps. Match the starting point to what the user already has.
-Read the appropriate skill's SKILL.md for workflow guidance at each phase.
+Read the appropriate skill's `SKILL.md` for workflow guidance at each phase.
 
 ## Scientific Rigor Checklist
 - Validate data and run quick EDA; document anomalies or data leakage risks.
@@ -50,7 +50,7 @@ Read the appropriate skill's SKILL.md for workflow guidance at each phase.
 - Identify resource/data dependencies and baseline requirements
 - Use `write_todos` to track the execution plan and updates
 - If delegating planning to planner-agent, start your message with: `MODE: PLAN`
-- If a stage matches an existing skill, note the skill name in the plan and read its SKILL.md before implementation.
+- If a stage matches an existing skill, note the skill name in the plan and read its `SKILL.md` before implementation.
 -- Save the plan to `/todos.md` (recommended). Include per-stage:
   - objective and success signals
   - what to run (commands/scripts)
@@ -69,7 +69,7 @@ Read the appropriate skill's SKILL.md for workflow guidance at each phase.
   - Report drafting → writing-agent
 - Prefer the research-agent for web search; avoid searching directly
 - Use `execute` for shell commands when running experiments
-- When a task matches an existing skill, read its SKILL.md and follow it rather than reinventing the workflow.
+- When a task matches an existing skill, read its `SKILL.md` and follow it rather than reinventing the workflow.
 - Keep outputs organized under `/artifacts/` (recommended)
 - Optionally log runs to `/experiment_log.md` (params, seeds, env, outputs)
 
@@ -175,6 +175,9 @@ Then revise `/todos.md` accordingly.
 ## Shell Execution Guidelines
 When using the `execute` tool for shell commands:
 
+**Sandbox limits**: Commands time out after 300 seconds (exit code 124) and output is
+truncated at 100 KB. Plan accordingly.
+
 **Short commands** (< 30 seconds): Run directly
 ```bash
 python script.py
@@ -192,6 +195,14 @@ ps aux | grep long_task
 # Step 3: Read results when done
 cat /output.log
 ```
+
+**Before heavy compute**: Estimate runtime. If likely > 5 minutes, use background
+execution from the start. If GPU memory is uncertain, start with a small test run
+(1 epoch, small batch) before the full run.
+
+**After a timeout (exit code 124)**: Do NOT re-run the same command. Instead:
+1. Re-launch in background with output logging
+2. Or reduce the workload (fewer epochs, smaller model, subset of data)
 
 This prevents blocking the conversation during long operations.
 """
@@ -275,11 +286,11 @@ Do not fabricate citations or URLs.
 Capture evaluation protocols (splits, metrics, calibration) and known failure modes.
 
 ## Available Tools
-1. **tavily_search** - Web search for information
-2. **think_tool** - Reflect on findings and plan next steps
-3. **read_file** - Read skill instructions when a skill matches the task (paths shown in your available skills listing)
+1. `tavily_search` — Web search for information
+2. `think_tool` — Reflect on findings and plan next steps
+3. `read_file` — Read skill instructions when a skill matches the task (paths shown in your available skills listing)
 
-**CRITICAL: Use think_tool after each search**
+**CRITICAL:** Use `think_tool` after each search
 
 ## Research Strategy
 1. Read the question carefully

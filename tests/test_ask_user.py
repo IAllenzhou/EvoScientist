@@ -279,6 +279,21 @@ class TestAskUserMiddleware:
         mw = AskUserMiddleware(system_prompt="custom prompt")
         assert mw.system_prompt == "custom prompt"
 
+    def test_system_prompt_mentions_resource_estimation(self):
+        from EvoScientist.middleware.ask_user import ASK_USER_SYSTEM_PROMPT
+
+        assert "estimation" in ASK_USER_SYSTEM_PROMPT.lower()
+
+    def test_system_prompt_mentions_timeout(self):
+        from EvoScientist.middleware.ask_user import ASK_USER_SYSTEM_PROMPT
+
+        assert "timeout" in ASK_USER_SYSTEM_PROMPT.lower()
+
+    def test_tool_description_mentions_resource(self):
+        from EvoScientist.middleware.ask_user import ASK_USER_TOOL_DESCRIPTION
+
+        assert "resource" in ASK_USER_TOOL_DESCRIPTION.lower()
+
 
 # ---------------------------------------------------------------------------
 # Stream event emitter

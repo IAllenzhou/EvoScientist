@@ -16,3 +16,7 @@ class TestThinkTool:
     def test_empty_reflection(self):
         result = think_tool.invoke({"reflection": ""})
         assert "Reflection recorded" in result
+
+    def test_docstring_has_resource_dimension(self):
+        assert "resource" in think_tool.description.lower()
+        assert "300" in think_tool.description
