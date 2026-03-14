@@ -416,11 +416,13 @@ def create_streaming_display(
     # Summarization panel (context was compressed by LangGraph middleware)
     if summarization_text:
         summary_display = summarization_text.rstrip()
-        if len(summary_display) > 300:
+        n = len(summary_display)
+        char_label = f"{n / 1000:.1f}k chars" if n >= 1000 else f"{n:,} chars"
+        if n > 300:
             summary_display = summary_display[:300] + " ..."
         elements.append(Panel(
             Text(summary_display, style="dim italic"),
-            title="Context Summarized",
+            title=f"Context Summarized ({char_label})",
             border_style="#f59e0b",
             padding=(0, 1),
         ))

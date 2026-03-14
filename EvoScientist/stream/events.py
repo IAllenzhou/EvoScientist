@@ -63,6 +63,30 @@ def _extract_tool_content(msg) -> tuple[str, bool]:
     return str(content), False
 
 
+def _extract_summarization_text(msg: Any) -> str:
+    """Extract plain text from a summarization chunk.
+
+    The summarization LLM streams ``AIMessageChunk`` objects whose
+    ``content`` may be a plain string **or** a list of content blocks
+    (e.g. ``[{'type': 'text', 'text': '...', 'index': 1}]``) depending
+    on the provider.  This helper normalises both forms to a plain string.
+    """
+    if not hasattr(msg, "content"):
+        return ""
+    content = msg.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return ""
+
+
 async def stream_agent_events(
     agent: Any,
     message: Any,
@@ -295,6 +319,8 @@ async def stream_agent_events(
         # HITL resume: Command object passed directly to agent
         astream_input = message
 
+    _summarization_in_progress = False
+
     try:
         async for chunk in agent.astream(
             astream_input,
@@ -381,13 +407,15 @@ async def stream_agent_events(
             else:
                 msg = data
 
-            # Emit summarization middleware messages as a dedicated event
+            # Accumulate summarization middleware chunks and emit text incrementally.
+            # The summarization LLM streams AIMessageChunks; content may be a
+            # plain string or a list of content blocks (provider-dependent).
             if isinstance(metadata, dict) and metadata.get("lc_source") == "summarization":
-                content = ""
-                if hasattr(msg, "content"):
-                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                if content:
-                    yield emitter.summarization(content).data
+                if not _summarization_in_progress:
+                    _summarization_in_progress = True
+                chunk_text = _extract_summarization_text(msg)
+                if chunk_text:
+                    yield emitter.summarization(chunk_text).data
                 continue
 
             subagent = _get_subagent_name(namespace, metadata)

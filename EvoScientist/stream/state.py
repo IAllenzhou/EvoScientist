@@ -266,7 +266,7 @@ class StreamState:
             self.pending_ask_user = event
 
         elif event_type == "summarization":
-            self.summarization_text = event.get("content", "")
+            self.summarization_text += event.get("content", "")
 
         elif event_type == "usage_stats":
             self.total_input_tokens += event.get("input_tokens", 0)

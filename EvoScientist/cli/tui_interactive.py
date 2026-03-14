@@ -712,9 +712,12 @@ def run_textual_interactive(
                                 if summarization_w is None:
                                     summarization_w = SummarizationWidget()
                                     await container.mount(summarization_w)
-                                summarization_w.set_content(content)
+                                summarization_w.append_text(content)
 
                         elif event_type == "text":
+                            # Finalize summarization widget when regular text resumes
+                            if summarization_w is not None and summarization_w._is_active:
+                                summarization_w.finalize()
                             if thinking_w is not None and thinking_w._is_active:
                                     thinking_w.finalize()
                             # Clear processing indicator
@@ -982,6 +985,9 @@ def run_textual_interactive(
                                     )
 
                         elif event_type == "done":
+                            # Finalize summarization if still active
+                            if summarization_w is not None and summarization_w._is_active:
+                                summarization_w.finalize()
                             # Clean up transient indicators
                             await _remove_w(narration_w)
                             narration_w = None
