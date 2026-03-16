@@ -506,6 +506,11 @@ We welcome contributions from developers, researchers, and AI coding agents at a
 
 ### 👥 Community Contributors
 
+⚗️ Join the EvoScientist community to discuss AI-driven research, share experiment results, and help shape the future of automated scientific discovery.
+
+- [Discord](https://discord.gg/???) — Ask questions, share findings, and collaborate with researchers and developers in real-time.
+- [WeChat](https://github.com/EvoScientist/EvoScientist/blob/main/.github/assets/cn_info.md) — Connect with our Chinese-speaking research community.
+
 Every contribution brings us one step closer to a future where AI accelerates scientific breakthroughs for all of humanity.
 
 <a href="https://github.com/EvoScientist/EvoScientist/graphs/contributors">
