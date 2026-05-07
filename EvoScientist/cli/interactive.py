@@ -967,15 +967,106 @@ def cmd_interactive(
                 finally:
                     _ch_mod._complete_channel_request(msg.msg_id)
 
+            async def _inject_notification_message(
+                text: str,
+                notifs: list,
+                *,
+                target_thread_id: str | None,
+            ) -> None:
+                """Inject a batched async-task notification as a synthetic user message.
+
+                Renders one compact tool-result-style line per task (matching the
+                TaskList spinner aesthetic) for the human operator.  The LLM
+                receives the full structured ``text`` from ``format_batch_message``
+                unchanged — only the screen visual is simplified.
+                """
+                from EvoScientist.cli.async_notifier import format_notification_lines
+
+                for line_text, line_style in format_notification_lines(notifs):
+                    console.print(line_text, style=line_style, markup=False)
+                meta = build_metadata(state["workspace_dir"], model)
+                await _refresh_status_snapshot(text, reset_streaming_text=True)
+                run_streaming(
+                    ui_backend=state["ui_backend"],
+                    agent=await _await_agent_ready(),
+                    message=text,
+                    # Falls back to live state["thread_id"] if no override is
+                    # passed (legacy / direct-call paths). Dedup reader has no
+                    # fallback and returns {} for a falsey id; the asymmetry
+                    # is intentional — we'd rather inject into the live thread
+                    # than drop the notification entirely.
+                    thread_id=target_thread_id or state["thread_id"],
+                    show_thinking=show_thinking,
+                    interactive=True,
+                    metadata=meta,
+                    on_stream_event=_handle_stream_status_event,
+                    status_footer_builder=_stream_status_footer,
+                )
+                await _refresh_status_snapshot(reset_streaming_text=True)
+                console.print()
+                _print_separator()
+                sys.stdout.write("\033[34;1m❯\033[0m ")
+                sys.stdout.flush()
+
+            async def _read_current_async_tasks(
+                target_thread_id: str | None,
+            ) -> dict[str, dict]:
+                """Snapshot async_tasks from the active agent state for dedup.
+
+                Uses ``agent_loader.agent`` (the currently loaded agent) and
+                ``target_thread_id`` (the thread id captured at the start of
+                ``consume_notifications`` — frozen so a mid-consume ``/new``
+                cannot make us read the wrong thread's state).
+                """
+                agent = agent_loader.agent
+                if agent is None or not target_thread_id:
+                    return {}
+                try:
+                    snap = await agent.aget_state(
+                        {"configurable": {"thread_id": target_thread_id}}
+                    )
+                    return (snap.values or {}).get("async_tasks") or {}
+                except Exception:
+                    return {}
+
             async def _check_channel_queue() -> None:
-                """Poll the channel message queue and dispatch to the agent."""
+                """Poll the channel + notification queues and dispatch."""
+                from EvoScientist.cli import async_notifier
+
                 while True:
                     try:
                         msg = _message_queue.get_nowait()
                     except queue.Empty:
-                        await asyncio.sleep(0.1)
+                        msg = None
+                    if msg is not None:
+                        await _process_channel_message(msg)
+                        continue  # check queues again immediately
+
+                    # Notification path (only when no channel message was pending).
+                    # Wrap in try/except so an exception in dedup/inject can't
+                    # kill the poller task — channel + notification dispatch
+                    # would silently die otherwise (Fix #4).
+                    current_tid = state.get("thread_id")
+                    if async_notifier.has_pending_notifications(current_tid):
+                        try:
+                            await async_notifier.consume_notifications(
+                                run_message=lambda text, notifs, _tid=current_tid: (
+                                    _inject_notification_message(
+                                        text, notifs, target_thread_id=_tid
+                                    )
+                                ),
+                                read_async_tasks_state=lambda _tid=current_tid: (
+                                    _read_current_async_tasks(_tid)
+                                ),
+                                current_thread_id=current_tid,
+                            )
+                        except Exception:
+                            _channel_logger.warning(
+                                "async-notifier consume failed", exc_info=True
+                            )
                         continue
-                    await _process_channel_message(msg)
+
+                    await asyncio.sleep(0.1)
 
             queue_task = asyncio.create_task(_check_channel_queue())
 
