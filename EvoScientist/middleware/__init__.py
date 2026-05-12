@@ -11,6 +11,7 @@ from .ask_user import (
     Choice,
     Question,
 )
+from .configurable_model import ConfigurableModelMiddleware
 from .context_editing import (
     compute_context_editing_trigger,
     create_context_editing_middleware,
@@ -22,6 +23,7 @@ from .memory import (
     ExtractedMemory,
     create_memory_middleware,
 )
+from .model_fallback import ModelFallbackMiddleware, load_fallback_chain
 from .tool_error_handler import ToolErrorHandlerMiddleware
 from .tool_selector import create_tool_selector_middleware
 from .utils import disable_thinking
@@ -31,10 +33,12 @@ __all__ = [
     "AskUserRequest",
     "AskUserWidgetResult",
     "Choice",
+    "ConfigurableModelMiddleware",
     "ContextOverflowMapperMiddleware",
     "EvoMemoryMiddleware",
     "EvoMemoryState",
     "ExtractedMemory",
+    "ModelFallbackMiddleware",
     "Question",
     "ToolErrorHandlerMiddleware",
     "compute_context_editing_trigger",
@@ -42,4 +46,5 @@ __all__ = [
     "create_memory_middleware",
     "create_tool_selector_middleware",
     "disable_thinking",
+    "load_fallback_chain",
 ]
