@@ -267,3 +267,30 @@ def test_async_subagents_available_init_false_without_env(monkeypatch):
 
     reloaded = importlib.reload(mgr)
     assert reloaded._ASYNC_SUBAGENTS_AVAILABLE is False
+
+
+def test_tunnel_true_appends_flag(monkeypatch, tmp_path, runtime_paths):
+    """``tunnel=True`` must add ``--tunnel`` to the langgraph dev argv."""
+    captured = _patch_start_prereqs(monkeypatch, tmp_path, runtime_paths)
+
+    with pytest.raises(_PopenAbort):
+        manager.start_langgraph_dev(
+            workspace_dir=tmp_path,
+            port=16190,
+            tunnel=True,
+        )
+
+    assert "--tunnel" in captured["args"]
+
+
+def test_tunnel_false_default_omits_flag(monkeypatch, tmp_path, runtime_paths):
+    """``tunnel`` defaults to False — no ``--tunnel`` in the argv."""
+    captured = _patch_start_prereqs(monkeypatch, tmp_path, runtime_paths)
+
+    with pytest.raises(_PopenAbort):
+        manager.start_langgraph_dev(
+            workspace_dir=tmp_path,
+            port=16191,
+        )
+
+    assert "--tunnel" not in captured["args"]

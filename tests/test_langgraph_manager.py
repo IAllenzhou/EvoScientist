@@ -24,10 +24,12 @@ def reset_module_state():
     manager._PROCESS = None
     manager._PROCESS_WORKSPACE = None
     manager._ASYNC_SUBAGENTS_AVAILABLE = False
+    manager._LOG_OFFSET_AT_START = 0
     yield
     manager._PROCESS = None
     manager._PROCESS_WORKSPACE = None
     manager._ASYNC_SUBAGENTS_AVAILABLE = False
+    manager._LOG_OFFSET_AT_START = 0
 
 
 # =============================================================================
@@ -468,3 +470,141 @@ class TestStartLanggraphDevRotatesLog:
         # under ``tmp_path``). The ``pid_dir`` we redirected to must
         # exist, proving the function reached past the mkdir prelude.
         assert pid_dir.is_dir()
+
+
+class TestStartLanggraphDevCapturesLogOffset:
+    """``start_langgraph_dev`` must capture ``_LOG_OFFSET_AT_START`` at the
+    right moment — after ``_rotate_log_if_needed`` + ``open('ab')`` but
+    before ``subprocess.Popen`` — so ``read_tunnel_url`` scans only this
+    session's bytes. The existing ``TestReadTunnelUrl`` tests monkeypatch
+    the offset directly (consumer side); these guard the producer side, so
+    a regression moving the capture line would actually be caught.
+    """
+
+    def _patch_prereqs(self, tmp_path, monkeypatch, log):
+        """Mock everything up to (but not including) Popen, redirecting all
+        runtime paths under ``tmp_path``."""
+        pid_dir = tmp_path / "pids"
+        monkeypatch.setattr(
+            manager,
+            "RUNTIME",
+            dataclasses.replace(
+                manager.LanggraphRuntimePaths.for_directory(pid_dir),
+                log_file=log,
+            ),
+        )
+        monkeypatch.setattr(manager, "_can_bind_port", lambda port: True)
+        fake_config = tmp_path / "langgraph.json"
+        fake_config.write_text("{}")
+        monkeypatch.setattr(manager, "_langgraph_exe", lambda: "/fake/langgraph")
+        monkeypatch.setattr(manager, "_packaged_langgraph_config", lambda: fake_config)
+
+    def test_offset_equals_existing_log_size(self, tmp_path, monkeypatch):
+        """No rotation → offset is the pre-existing (appended-to) log size,
+        so a stale URL above that offset is never re-read."""
+        log = tmp_path / "langgraph_dev.log"
+        log.write_bytes(b"x" * 512)
+        # Keep the log well under the rotation threshold so it is NOT rotated.
+        monkeypatch.setattr(manager, "_LOG_ROTATION_BYTES", 10**9)
+        self._patch_prereqs(tmp_path, monkeypatch, log)
+
+        captured: dict = {}
+
+        def _fake_popen(args, **kwargs):
+            # Read the global at the instant Popen is invoked — this is
+            # strictly after the capture line in start_langgraph_dev.
+            captured["offset"] = manager._LOG_OFFSET_AT_START
+            raise FileNotFoundError("stop before real spawn")
+
+        monkeypatch.setattr(
+            "EvoScientist.langgraph_dev.manager.subprocess.Popen", _fake_popen
+        )
+        try:
+            manager.start_langgraph_dev(workspace_dir=tmp_path)
+        except FileNotFoundError:
+            pass
+        assert captured["offset"] == 512
+
+    def test_offset_zero_after_forced_rotation(self, tmp_path, monkeypatch):
+        """Forced rotation moves the old log away; the fresh ``open('ab')``
+        starts empty → offset 0 (scan the whole new file)."""
+        log = tmp_path / "langgraph_dev.log"
+        log.write_bytes(b"x" * 4096)
+        monkeypatch.setattr(manager, "_LOG_ROTATION_BYTES", 1024)
+        self._patch_prereqs(tmp_path, monkeypatch, log)
+
+        captured: dict = {}
+
+        def _fake_popen(args, **kwargs):
+            captured["offset"] = manager._LOG_OFFSET_AT_START
+            raise FileNotFoundError("stop before real spawn")
+
+        monkeypatch.setattr(
+            "EvoScientist.langgraph_dev.manager.subprocess.Popen", _fake_popen
+        )
+        try:
+            manager.start_langgraph_dev(workspace_dir=tmp_path)
+        except FileNotFoundError:
+            pass
+        assert (tmp_path / "langgraph_dev.log.1").exists()  # rotation happened
+        assert captured["offset"] == 0
+
+
+# =============================================================================
+# read_tunnel_url
+# =============================================================================
+
+
+class TestReadTunnelUrl:
+    """``read_tunnel_url`` scrapes the Cloudflare tunnel URL from the log,
+    scanning only bytes written after the current subprocess started."""
+
+    def test_returns_url_when_present(self, tmp_path, runtime_paths, monkeypatch):
+        log = tmp_path / "langgraph_dev.log"
+        log.write_text(
+            "INFO server up\n"
+            "[cloudflared] Your quick Tunnel has been created! Visit it at:\n"
+            "[cloudflared] https://happy-tiger-demo.trycloudflare.com\n"
+        )
+        monkeypatch.setattr(
+            manager, "RUNTIME", dataclasses.replace(runtime_paths, log_file=log)
+        )
+        monkeypatch.setattr(manager, "_LOG_OFFSET_AT_START", 0)
+
+        assert (
+            manager.read_tunnel_url(timeout=1.0)
+            == "https://happy-tiger-demo.trycloudflare.com"
+        )
+
+    def test_returns_none_on_timeout(self, tmp_path, runtime_paths, monkeypatch):
+        log = tmp_path / "langgraph_dev.log"
+        log.write_text("INFO server up — but no tunnel line ever printed\n")
+        monkeypatch.setattr(
+            manager, "RUNTIME", dataclasses.replace(runtime_paths, log_file=log)
+        )
+        monkeypatch.setattr(manager, "_LOG_OFFSET_AT_START", 0)
+
+        assert manager.read_tunnel_url(timeout=0.2, poll_interval=0.05) is None
+
+    def test_ignores_stale_url_before_offset(
+        self, tmp_path, runtime_paths, monkeypatch
+    ):
+        """A URL from a previous session (before the offset) must be skipped;
+        only this session's bytes count."""
+        stale = "[cloudflared] https://old-stale-url.trycloudflare.com\n"
+        log = tmp_path / "langgraph_dev.log"
+        log.write_text(stale)
+        monkeypatch.setattr(
+            manager, "RUNTIME", dataclasses.replace(runtime_paths, log_file=log)
+        )
+        # Offset points past the stale line — nothing fresh yet → None.
+        monkeypatch.setattr(manager, "_LOG_OFFSET_AT_START", len(stale.encode()))
+        assert manager.read_tunnel_url(timeout=0.2, poll_interval=0.05) is None
+
+        # Now this session appends its own fresh URL → returned.
+        with open(log, "a") as fh:
+            fh.write("[cloudflared] https://fresh-new-url.trycloudflare.com\n")
+        assert (
+            manager.read_tunnel_url(timeout=1.0)
+            == "https://fresh-new-url.trycloudflare.com"
+        )

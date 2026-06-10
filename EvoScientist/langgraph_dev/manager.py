@@ -15,6 +15,7 @@ import atexit
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -252,6 +253,16 @@ _PROCESS: subprocess.Popen | None = None
 # a thread from a different workspace) and trigger a restart so the deployed
 # sub-agents' cwd / EVOSCIENTIST_WORKSPACE_DIR env match the new workspace.
 _PROCESS_WORKSPACE: Path | None = None
+
+# Byte offset into ``RUNTIME.log_file`` captured the instant before the current
+# subprocess was spawned. ``read_tunnel_url`` scans only bytes written after
+# this point so a stale ``trycloudflare.com`` URL from a previous (appended,
+# not-yet-rotated) session can never be misreported as the live tunnel.
+_LOG_OFFSET_AT_START: int = 0
+
+# Cloudflare quick-tunnel public URL, as printed by cloudflared into the
+# langgraph dev log. Mirrors langgraph_api/tunneling/cloudflare.py.
+_TUNNEL_URL_RE = re.compile(r"https://[A-Za-z0-9.-]+\.trycloudflare\.com")
 
 # Whether async sub-agents are usable in this process.
 #
@@ -525,6 +536,7 @@ def start_langgraph_dev(
     file_persistence: bool = True,
     jobs_per_worker: int = 10,
     deploy_mode: bool = False,
+    tunnel: bool = False,
 ) -> subprocess.Popen:
     """Start langgraph dev as a background subprocess.
 
@@ -538,6 +550,14 @@ def start_langgraph_dev(
             ``.langgraph_api/`` cache so async-task / Store / scheduler state
             survives subprocess restarts. Set False to suppress periodic
             flushes (workspace stays cleaner; state is in-memory only).
+        jobs_per_worker: Concurrent runs per worker (``--n-jobs-per-worker``).
+        deploy_mode: When True, the subprocess loads full MCP + async
+            sub-agents (``EVOSCIENTIST_DEPLOY_MODE=full``); otherwise stripped.
+        tunnel: When True, pass ``--tunnel`` so langgraph dev exposes the
+            server over a public Cloudflare quick-tunnel. The random
+            ``*.trycloudflare.com`` URL is written to the log; read it back
+            with :func:`read_tunnel_url`. SECURITY: the tunnel has no auth and
+            the deployed agent can run shell — only enable for trusted use.
 
     Returns:
         The Popen handle for the langgraph dev process.
@@ -626,6 +646,14 @@ def start_langgraph_dev(
     # one fd — a problem on heavy ``/resume`` cycling that could eventually
     # exhaust the process's open-file limit.
     log_handle = open(RUNTIME.log_file, "ab")  # closed in finally below
+    # Remember where this session's output begins so ``read_tunnel_url`` only
+    # scans lines this subprocess writes — never a stale URL left in the
+    # appended-to log by a previous tunnel session.
+    global _LOG_OFFSET_AT_START
+    try:
+        _LOG_OFFSET_AT_START = RUNTIME.log_file.stat().st_size
+    except OSError:
+        _LOG_OFFSET_AT_START = 0
 
     # Propagate workspace to the subprocess so deployed sub-agents resolve
     # paths.WORKSPACE_ROOT to the same dir as the CLI's main agent. cwd alone
@@ -685,6 +713,7 @@ def start_langgraph_dev(
                 str(jobs_per_worker),
                 "--no-browser",
                 "--no-reload",
+                *(["--tunnel"] if tunnel else []),
             ],
             cwd=str(workspace_dir),
             stdout=log_handle,
@@ -739,6 +768,40 @@ def start_langgraph_dev(
     raise RuntimeError(
         f"langgraph dev did not become healthy within 60 seconds. Check {RUNTIME.log_file}"
     )
+
+
+def read_tunnel_url(timeout: float = 35.0, poll_interval: float = 0.5) -> str | None:
+    """Poll the langgraph dev log for the Cloudflare quick-tunnel public URL.
+
+    Started with ``tunnel=True``, langgraph dev shells out to cloudflared,
+    which prints a random ``https://<words>.trycloudflare.com`` URL once the
+    tunnel is established — typically a few seconds after the local server is
+    already healthy. We scan only the bytes written since this subprocess
+    started (``_LOG_OFFSET_AT_START``) so a stale URL from an earlier session
+    in the same appended-to log is never returned.
+
+    Args:
+        timeout: Max seconds to wait for the URL to appear. cloudflared may
+            also need to download its binary on first use, so the default is
+            generous (langgraph_api itself waits up to 30s internally).
+        poll_interval: Seconds between log re-reads.
+
+    Returns:
+        The public tunnel URL, or ``None`` if it never appeared in time.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with open(RUNTIME.log_file, "rb") as fh:
+                fh.seek(_LOG_OFFSET_AT_START)
+                chunk = fh.read().decode("utf-8", errors="replace")
+        except OSError:
+            chunk = ""
+        match = _TUNNEL_URL_RE.search(chunk)
+        if match:
+            return match.group(0)
+        time.sleep(poll_interval)
+    return None
 
 
 def stop_langgraph_dev(proc: subprocess.Popen | None = None) -> None:
