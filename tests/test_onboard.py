@@ -689,6 +689,11 @@ class TestStepSkills:
         with (
             patch("EvoScientist.config.onboard.style.questionary") as mock_q,
             patch("EvoScientist.config.onboard.steps.console"),
+            # Empty selection triggers the npx easter-egg check; without this
+            # mock the real questionary.confirm in _ensure_npx fires on hosts
+            # where npx is missing/slow (NoConsoleScreenBufferError on
+            # headless Windows CI).
+            patch("EvoScientist.config.onboard.steps._ensure_npx", return_value=True),
         ):
             mock_q.checkbox.return_value.ask.return_value = []
             result = _step_skills()
@@ -775,6 +780,9 @@ class TestStepSkills:
                 "EvoScientist.config.onboard.steps._checkbox_ask", side_effect=_capture
             ),
             patch("EvoScientist.config.onboard.steps.console"),
+            # _capture returns [] (empty selection), which would otherwise
+            # reach the real _ensure_npx — see test_returns_empty_when_none_selected.
+            patch("EvoScientist.config.onboard.steps._ensure_npx", return_value=True),
         ):
             _step_skills()
 
@@ -828,6 +836,9 @@ class TestStepSkills:
                 "EvoScientist.config.onboard.steps._checkbox_ask", side_effect=_capture
             ),
             patch("EvoScientist.config.onboard.steps.console"),
+            # _capture returns [] (empty selection), which would otherwise
+            # reach the real _ensure_npx — see test_returns_empty_when_none_selected.
+            patch("EvoScientist.config.onboard.steps._ensure_npx", return_value=True),
         ):
             _step_skills()
 
@@ -872,6 +883,9 @@ class TestStepSkills:
                 "EvoScientist.config.onboard.steps._checkbox_ask", side_effect=_capture
             ),
             patch("EvoScientist.config.onboard.steps.console"),
+            # _capture returns [] (empty selection), which would otherwise
+            # reach the real _ensure_npx — see test_returns_empty_when_none_selected.
+            patch("EvoScientist.config.onboard.steps._ensure_npx", return_value=True),
         ):
             _step_skills()
 
