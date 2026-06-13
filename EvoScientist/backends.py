@@ -627,36 +627,79 @@ def _resolve_virtual_mount_path(token: str) -> str | None:
     return None
 
 
+def _guard_bare_absolute(result: str | None) -> str | None:
+    """If *result* is a bare absolute path (no surrounding quotes),
+    single-quote it so the post-process regex won't re-rewrite it."""
+    if result and result.startswith("/") and result == result.strip("'\""):
+        return "'" + result + "'"
+    return result
+
+
+def _rewrite_quoted_path(
+    path: str,
+    workspace_name: str | None,
+) -> str | None:
+    """Return the shell-quoted replacement for *path* (the decoded
+    content of a quoted ``"..."`` or ``'...'`` argument),
+    or ``None`` if no rewrite applies.
+    """
+    if not path or "://" in path[max(0, len(path) - 10) :]:
+        return None
+    if not path.startswith("/"):
+        return None
+
+    resolved = _resolve_virtual_mount_path(path)
+    if resolved is not None:
+        return _guard_bare_absolute(resolved)  # already shlex.quoted
+
+    # Fix hallucinated system absolute paths that reference the workspace.
+    if workspace_name:
+        for prefix in _SYSTEM_PATH_PREFIXES:
+            if path.startswith(prefix):
+                marker = f"/{workspace_name}/"
+                idx = path.rfind(marker)
+                if idx != -1:
+                    relative = path[idx + len(marker) :]
+                    return _guard_bare_absolute(
+                        shlex.quote("./" + relative if relative else ".")
+                    )
+                if path.endswith(f"/{workspace_name}"):
+                    return _guard_bare_absolute(shlex.quote("."))
+                break
+
+    return None
+
+
 def convert_virtual_paths_in_command(
     command: str,
     workspace_name: str | None = None,
 ) -> str:
-    """
-    Convert virtual paths (starting with /) in commands to relative paths.
+    """Convert virtual paths (starting with ``/``) in commands to relative paths.
 
     Also auto-corrects hallucinated system absolute paths that reference the
     workspace directory (e.g. ``/Users/.../myproject/file.py`` → ``./file.py``).
 
-    Tier-aware mounts (``/skills/...``, ``/memories/...``) are expanded to
-    absolute paths via ``_resolve_virtual_mount_path``. Callers that pass
-    the result through ``validate_command`` MUST whitelist the tier roots
-    via ``allow_prefixes`` to avoid false-positive system-path blocks.
-
-    Args:
-        command: Original command.
-        workspace_name: Basename of the workspace directory (e.g. ``"workspace"``,
-            ``"my-project"``).  When provided, system paths containing
-            ``/<workspace_name>/`` are auto-corrected.
-
-    Examples:
-        >>> convert_virtual_paths_in_command("python /main.py")
-        'python ./main.py'
-        >>> convert_virtual_paths_in_command("ls /")
-        'ls .'
-        >>> convert_virtual_paths_in_command(
-        ...     "mkdir -p /Users/u/proj/dir", workspace_name="proj")
-        'mkdir -p ./dir'
+    Pre-process: quoted arguments whose content resolves to a virtual
+    mount (``/skills/...``, ``/memories/...``) or a workspace-prefixed
+    system path are rewritten as a single shell token — this fixes #237
+    where ``python "/skills/my skill/main.py"`` was truncated at the
+    embedded space.  Bare quoted ``/...`` paths (e.g. ``echo "/hi"``)
+    are left untouched since their semantics are ambiguous.
+    After pre-processing, the original regex handles unquoted
+    paths and workspace-name correction as before.
     """
+    # Pre-process: rewrite quoted paths whose decoded content starts with /
+    command = re.sub(
+        r'(["\'])((?:\\.|(?!\1).)*?)\1',
+        lambda m: (
+            _rewrite_quoted_path(
+                re.sub(r"\\(.)", r"\1", m.group(2)),
+                workspace_name,
+            )
+            or m.group(0)
+        ),
+        command,
+    )
 
     def replace_virtual_path(match: re.Match[str]) -> str:
         path = match.group(0)
@@ -670,16 +713,10 @@ def convert_virtual_paths_in_command(
             return resolved
 
         # Fix hallucinated system absolute paths that reference the workspace.
-        # E.g. /Users/user/.../myproject/file.py → ./file.py
-        # This mirrors _resolve_path() logic but for shell command strings.
         if workspace_name:
             for prefix in _SYSTEM_PATH_PREFIXES:
                 if path.startswith(prefix):
                     marker = f"/{workspace_name}/"
-                    # rfind, not find: the workspace's parent path may itself
-                    # contain "/<workspace_name>/" (e.g. dev tree under
-                    # ~/workspace/.../workspace). Last occurrence is the
-                    # boundary closest to the file.
                     idx = path.rfind(marker)
                     if idx != -1:
                         relative = path[idx + len(marker) :]
@@ -691,8 +728,7 @@ def convert_virtual_paths_in_command(
         # Convert virtual path
         if path == "/":
             return "."
-        else:
-            return "." + path
+        return "." + path
 
     # Match pattern: paths starting with / (but not URLs)
     pattern = r'(?<=\s)/[^\s;|&<>\'"`]*|^/[^\s;|&<>\'"`]*'

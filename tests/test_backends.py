@@ -213,6 +213,118 @@ class TestConvertVirtualPaths:
         result = convert_virtual_paths_in_command(command)
         assert result == "ssh host 'ls ./home/username/project'"
 
+    def test_bare_quoted_path_left_alone(self):
+        """A quoted bare ``/...`` path that is not a virtual mount
+        (``/skills/...``, ``/memories/...``) or workspace path must
+        NOT be rewritten — we cannot textually distinguish a path
+        argument from a literal string without command semantics.
+        """
+        result = convert_virtual_paths_in_command('python "/main file.py"')
+        assert result == 'python "/main file.py"'
+
+    def test_quoted_skills_path_with_whitespace_in_skill_name_resolved(
+        self, monkeypatch, tmp_path
+    ):
+        """A quoted ``/skills/<name with space>/...`` path must be
+        resolved as a single token, not truncated at the space (was:
+        the regex stopped at the first whitespace, so the resolver
+        received ``/skills/<word>`` and the suffix landed as a separate
+        argument).
+        """
+        # Tier setup identical to TestVirtualMountResolution._setup_tiers
+        user_dir = tmp_path / "ws_skills"
+        global_dir = tmp_path / "global_skills"
+        builtin_dir = tmp_path / "builtin_skills"
+        memories_dir = tmp_path / "memories"
+        for d in (user_dir, global_dir, builtin_dir, memories_dir):
+            d.mkdir()
+        monkeypatch.setattr(paths, "USER_SKILLS_DIR", user_dir)
+        monkeypatch.setattr(paths, "GLOBAL_SKILLS_DIR", global_dir)
+        monkeypatch.setattr(paths, "MEMORIES_DIR", memories_dir)
+        monkeypatch.setattr(backends, "_BUILTIN_SKILLS_DIR", builtin_dir)
+        (builtin_dir / "find skills").mkdir()
+        (builtin_dir / "find skills" / "tool.py").write_text("print('ok')")
+
+        result = convert_virtual_paths_in_command(
+            'python "/skills/find skills/tool.py"'
+        )
+
+        tokens = shlex.split(result)
+        assert tokens[0] == "python"
+        assert tokens[1] == str(builtin_dir / "find skills" / "tool.py")
+
+    def test_quoted_system_path_with_workspace_and_whitespace_corrected(self):
+        """A quoted system path that references the workspace dir name
+        (which itself contains a space) must be auto-corrected to the
+        workspace-relative form, not left as the original quoted string.
+        """
+        result = convert_virtual_paths_in_command(
+            'python "/Users/user/my project/src/main.py"',
+            workspace_name="my project",
+        )
+        tokens = shlex.split(result)
+        assert tokens == ["python", "./src/main.py"]
+
+    def test_quoted_path_with_whitespace_round_trip_safe(self):
+        """A quoted ``/skills/...`` path with whitespace must round-trip
+        through ``shlex.split`` as a single token.
+        """
+        result = convert_virtual_paths_in_command(
+            'python "/skills/find skills/tool.py"'
+        )
+        tokens = shlex.split(result)
+        assert tokens[0] == "python"
+        assert len(tokens) == 2
+        assert "find skills" in tokens[1]
+
+    def test_quoted_system_path_left_alone(self):
+        """A quoted path starting with a system prefix (e.g. ``/bin/echo``)
+        must NOT be rewritten — the pre-process excludes known system
+        prefixes so ``validate_command`` can still inspect them."""
+        result = convert_virtual_paths_in_command('python "/bin/echo"')
+        assert result == 'python "/bin/echo"'
+
+    def test_bash_c_with_quoted_system_path_left_alone(self):
+        """``bash -c "/bin/echo hi"`` must NOT be rewritten — the
+        ``/bin/echo`` inside the quoted argument is a shell command body,
+        not a virtual path argument to be rewritten."""
+        result = convert_virtual_paths_in_command('bash -c "/bin/echo hi"')
+        assert result == 'bash -c "/bin/echo hi"'
+
+    def test_unresolvable_quoted_skills_path_uses_workspace_relative_form(
+        self, monkeypatch, tmp_path
+    ):
+        """A quoted ``/skills/...`` path that no tier contains falls
+        through to the workspace-relative ``./skills/<rel>`` form. The
+        splice re-quotes the result; if the new path has no
+        whitespace, ``shlex.quote`` is a no-op and the surrounding
+        quote chars are dropped cleanly.
+        """
+        # Tier setup so the resolver is in a known empty state.
+        for d in (
+            tmp_path / "ws_skills",
+            tmp_path / "global_skills",
+            tmp_path / "builtin_skills",
+            tmp_path / "memories",
+        ):
+            d.mkdir()
+        monkeypatch.setattr(paths, "USER_SKILLS_DIR", tmp_path / "ws_skills")
+        monkeypatch.setattr(paths, "GLOBAL_SKILLS_DIR", tmp_path / "global_skills")
+        monkeypatch.setattr(paths, "MEMORIES_DIR", tmp_path / "memories")
+        monkeypatch.setattr(
+            backends, "_BUILTIN_SKILLS_DIR", tmp_path / "builtin_skills"
+        )
+        result = convert_virtual_paths_in_command(
+            'python "/skills/never-installed/foo.py"'
+        )
+        assert result == "python ./skills/never-installed/foo.py"
+
+    def test_echo_bare_quoted_path_left_alone(self):
+        """``echo "/hi"`` must NOT be rewritten — a bare ``/hi`` is not a
+        virtual mount, so the pre-process must leave it alone."""
+        result = convert_virtual_paths_in_command('echo "/hi"')
+        assert result == 'echo "/hi"'
+
 
 # === tier-aware virtual mounts (/skills/, /memories/) ===
 
@@ -675,7 +787,7 @@ class TestResolvePath:
         backend = CustomSandboxBackend(root_dir=tmp_workspace, virtual_mode=True)
         # /workspace/main.py should resolve to root/main.py
         resolved = backend._resolve_path("/workspace/main.py")
-        assert str(resolved).endswith("main.py")
+        assert Path(resolved).parts[-1] == "main.py"
         assert "workspace/workspace" not in str(resolved)
 
     def test_workspace_root(self, tmp_workspace):
@@ -687,13 +799,13 @@ class TestResolvePath:
     def test_system_path_with_workspace_marker(self, tmp_workspace):
         backend = CustomSandboxBackend(root_dir=tmp_workspace, virtual_mode=True)
         resolved = backend._resolve_path("/Users/someone/project/workspace/main.py")
-        assert str(resolved).endswith("main.py")
+        assert Path(resolved).parts[-1] == "main.py"
 
     def test_system_path_without_workspace(self, tmp_workspace):
         backend = CustomSandboxBackend(root_dir=tmp_workspace, virtual_mode=True)
         resolved = backend._resolve_path("/Users/someone/file.py")
         # Falls back to basename
-        assert str(resolved).endswith("file.py")
+        assert Path(resolved).parts[-1] == "file.py"
 
     def test_custom_workspace_name_prefix_stripped(self, tmp_path):
         """_resolve_path uses the actual dir name, not hardcoded 'workspace'."""
@@ -701,7 +813,7 @@ class TestResolvePath:
         ws.mkdir()
         backend = CustomSandboxBackend(root_dir=str(ws), virtual_mode=True)
         resolved = backend._resolve_path("/my-project/main.py")
-        assert str(resolved).endswith("main.py")
+        assert Path(resolved).parts[-1] == "main.py"
         assert "my-project/my-project" not in str(resolved)
 
     def test_custom_workspace_name_system_path(self, tmp_path):
